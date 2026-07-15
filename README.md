@@ -295,7 +295,7 @@ The **Locator YAML structure already supports per-platform** — only the iOS va
 
 Minimal GitHub Actions workflow at `.github/workflows/ci.yml`:
 
-- Trigger: push to `main` / pull_request
+- Trigger: push to `test` / pull_request
 - Steps: install Appium, start emulator, run pytest, upload Allure report as artifact
 - See the file for full config
 
