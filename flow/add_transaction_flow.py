@@ -158,6 +158,86 @@ class AddTransactionFlow:
             category=cleaned_category,
         )
 
+    def ensure_home_page(self) -> None:
+        """Skip onboarding if needed and verify the Home page is visible."""
+        self._home_page.skip_onboarding_if_visible()
+        self._home_page.verify_visible()
+
+    def tap_add_shortcut(self, shortcut_name: str) -> None:
+        """Tap a Home shortcut that opens the Add Transaction form.
+
+        Args:
+            shortcut_name: One of ``Add Expense``, ``Add Income``, or
+                ``Add Transfer``.
+
+        Raises:
+            ValueError: If the shortcut name is unsupported.
+        """
+        normalized_name = shortcut_name.strip().lower()
+        if normalized_name == "add expense":
+            self._home_page.click_add_expense()
+        elif normalized_name == "add income":
+            self._home_page.click_add_income()
+        elif normalized_name == "add transfer":
+            self._home_page.click_add_transfer()
+        else:
+            raise ValueError(f"Unsupported Add Transaction shortcut: {shortcut_name}")
+
+    def enter_amount(self, amount: int | float | str) -> None:
+        """Enter the amount on the Add Transaction form.
+
+        Args:
+            amount: Positive transaction amount.
+        """
+        parsed_amount = self._validate_amount(amount)
+        self._add_transaction_page.enter_amount(str(parsed_amount))
+
+    def select_category(self, category: str) -> None:
+        """Select a category on the Add Transaction form.
+
+        Args:
+            category: Existing category name.
+        """
+        self._add_transaction_page.select_category(self._validate_category(category))
+
+    def enter_note(self, note: str) -> None:
+        """Enter a note on the Add Transaction form.
+
+        Args:
+            note: Note text.
+        """
+        self._add_transaction_page.enter_note(note)
+
+    def tap_save(self) -> None:
+        """Submit the Add Transaction form."""
+        self._add_transaction_page.tap_save()
+
+    def assert_recent_transaction_amount(self, amount: int | float | str) -> None:
+        """Assert that Recent Transactions contains the submitted amount.
+
+        Args:
+            amount: Amount expected in the recent transaction row.
+
+        Raises:
+            AssertionError: If the formatted amount is not visible.
+        """
+        self._home_page.verify_visible()
+        formatted_amount = self._format_recent_amount(self._validate_amount(amount))
+        assert self._home_page.has_recent_transaction_amount(formatted_amount), (
+            f"Recent Transactions did not show amount {formatted_amount}"
+        )
+
+    def assert_no_recent_transactions(self) -> None:
+        """Assert that Recent Transactions is empty.
+
+        Raises:
+            AssertionError: If the empty state is not visible.
+        """
+        self._home_page.verify_visible()
+        assert self._home_page.has_empty_transactions_message(), (
+            "Recent Transactions was expected to be empty."
+        )
+
     def _open_add_transaction(self, transaction_type: str) -> None:
         self._home_page.verify_visible()
         if transaction_type == "expense":
@@ -211,3 +291,6 @@ class AddTransactionFlow:
 
     def _new_transaction_id(self, transaction_type: str) -> str:
         return f"{transaction_type}-{uuid4().hex}"
+
+    def _format_recent_amount(self, amount: Decimal) -> str:
+        return f"{amount:,.2f}"

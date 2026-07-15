@@ -30,7 +30,12 @@ class HomePage(BasePage):
     def verify_visible(self) -> None:
         """Wait until the Home page is visible."""
         self.wait_for(self._loc("home_tab"))
-        self.wait_for(self._loc("add_transaction_button"))
+        self.wait_for(self._loc("recent_transactions_title"))
+
+    def skip_onboarding_if_visible(self) -> None:
+        """Skip first-run onboarding when it is present."""
+        if self.is_visible(self._loc("onboarding_skip_button"), timeout=5):
+            self.click(self._loc("onboarding_skip_button"))
 
     def click_add_expense(self) -> None:
         """Open Add Transaction with Expense selected."""
@@ -60,5 +65,27 @@ class HomePage(BasePage):
         """
         return self.is_visible(self._loc("recent_transactions_title"))
 
-    def _loc(self, key: str) -> Locator:
-        return load_locator("home", key, self._platform)
+    def has_recent_transaction_amount(self, amount: str) -> bool:
+        """Return whether a recent transaction contains the amount.
+
+        Args:
+            amount: Formatted amount substring to search for.
+
+        Returns:
+            True when a recent transaction row contains the amount.
+        """
+        return self.is_visible(self._loc("recent_transaction_amount", amount=amount))
+
+    def has_empty_transactions_message(self) -> bool:
+        """Return whether the empty Recent Transactions state is visible.
+
+        Returns:
+            True when the empty state is visible, otherwise False.
+        """
+        return self.is_visible(self._loc("empty_transactions_message"), timeout=3)
+
+    def _loc(self, key: str, **format_values: str) -> Locator:
+        strategy, value = load_locator("home", key, self._platform)
+        if format_values:
+            value = value.format(**format_values)
+        return strategy, value

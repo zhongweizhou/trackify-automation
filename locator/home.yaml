@@ -12,6 +12,13 @@ home_tab:
   ios:
     accessibility_id: "Home"
 
+onboarding_skip_button:
+  description: "Button to skip the first-run onboarding flow"
+  android:
+    accessibility_id: "Skip"
+  ios:
+    accessibility_id: "Skip"
+
 add_expense_button:
   description: "Home shortcut to open Add Transaction with Expense selected"
   android:
@@ -46,6 +53,20 @@ recent_transactions_title:
     accessibility_id: "Recent Transactions"
   ios:
     accessibility_id: "Recent Transactions"
+
+recent_transaction_amount:
+  description: "Recent transaction row containing a formatted amount"
+  android:
+    xpath: "//*[contains(@content-desc, '{amount}')]"
+  ios:
+    predicate: "label CONTAINS '{amount}'"
+
+empty_transactions_message:
+  description: "Empty state shown when there are no recent transactions"
+  android:
+    accessibility_id: "No transactions yet"
+  ios:
+    accessibility_id: "No transactions yet"
 
 see_all_transactions_button:
   description: "Link from Home recent transactions to the Transactions page"
