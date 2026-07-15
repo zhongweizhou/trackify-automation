@@ -690,9 +690,10 @@ Given user is on the Add Transaction page
 Given user is on the Transactions page
 ```
 
-#### When phrases (12 actions)
+#### When phrases (14 actions)
 
 ```gherkin
+When user taps "<shortcut_name:str>"
 When user selects type "<type:str>"                  # type ∈ {expense, income, transfer}
 When user enters amount "<amount:float>"
 When user leaves amount empty
@@ -704,6 +705,7 @@ When user taps Save
 When user taps Cancel
 When user taps "Add new category"
 When user creates custom category "<name:str>"
+When user navigates to the Transactions page
 When user filters transactions by type "<type:str>"  # type ∈ {expense, income, transfer}
 ```
 
@@ -840,8 +842,16 @@ Feature: Transactions List
 
   @p1 @filter
   Scenario: Filter transactions by type shows only matching type
-    When user adds an expense "100" with category "Food"
-    And user adds an income "5000" with category "Salary"
+    When user taps "Add Expense"
+    And user enters amount "100"
+    And user selects category "Food"
+    And user enters tags "filter,expense"
+    And user taps Save
+    And user taps "Add Income"
+    And user enters amount "5000"
+    And user selects category "Salary"
+    And user enters tags "filter,income"
+    And user taps Save
     And user navigates to the Transactions page
     And user filters transactions by type "expense"
     Then only transactions of type "expense" are shown
@@ -851,13 +861,14 @@ Feature: Transactions List
     When user taps "Add Expense"
     And user enters amount "100"
     And user selects category "Food"
+    And user enters tags "history,expense"
     And user selects transaction date and time "20250506 9:00 AM"
     And user taps Save
     And user navigates to the Transactions page
     Then transactions are grouped by date with section headers
 ```
 
-> ⚠️ **Note for Codex**: the two "user adds an expense X with category Y" lines in `transactions.feature` Background setup rely on the `When user taps "Add Expense" → enters amount → selects category → taps Save` chain from §6.6. If §6.6 phrases change, update both feature files in the same commit.
+> The Transactions scenarios reuse setup and transaction-entry steps from `tests/step_defs/common_steps.py`; feature-specific steps only navigate, filter, and assert list behavior.
 
 **Why this inventory is here, not just in Feature_Inventory.md**:
 - Feature_Inventory.md is the **what** (which features, why chosen).
