@@ -4,7 +4,7 @@
 >
 > Built as part of the Trackify Challenge.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue)] [![Appium](https://img.shields.io/badge/Appium-3.x-green)] [![pytest-bdd](https://img.shields.io/badge/pytest--bdd-BDD-orange)] [![Allure](https://img.shields.io/badge/Allure-Reporting-yellow)]
+[![Python](https://img.shields.io/badge/Python-3.11+-blue)](https://www.python.org/) [![Appium](https://img.shields.io/badge/Appium-3.x-green)](https://appium.io/) [![pytest-bdd](https://img.shields.io/badge/pytest--bdd-BDD-orange)](https://pytest-bdd.readthedocs.io/) [![Allure](https://img.shields.io/badge/Allure-Reporting-yellow)](https://allurereport.org/)
 
 ---
 
@@ -32,6 +32,7 @@ Trackify is a 100% offline Flutter personal-finance tracker using Hive as its lo
 
 - macOS with Apple Silicon (M1 / M2 / M3 / M4) — tested
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager
 - Node.js LTS
 - Android SDK + Platform Tools (`adb`)
 - An Android emulator or real device with **Android 10+**
@@ -40,11 +41,11 @@ Trackify is a 100% offline Flutter personal-finance tracker using Hive as its lo
 
 ```bash
 # Clone
-git clone https://github.com/<your-username>/trackify-automation
+git clone https://github.com/zhongweizhou/trackify-automation.git
 cd trackify-automation
 
 # Python deps (using uv)
-uv sync             # or: pip install -r requirements.txt
+uv sync
 
 # Appium drivers
 npm install -g appium
@@ -53,27 +54,29 @@ appium driver install uiautomator2
 # Start Appium server in one terminal
 appium
 
-# In another terminal: install the app on a running emulator
-adb install -r -t app-release.apk
+# Put the local APK in the ignored app directory, then install it
+mkdir -p app
+cp /path/to/app-release.apk app/app-release.apk
+adb install -r -t app/app-release.apk
 ```
 
 ### Run Tests
 
 ```bash
 # All tests
-pytest
+uv run pytest
 
 # Smoke only (P0)
-pytest -m smoke
+uv run pytest -m smoke
 
-# Regression (P0 + P1)
-pytest -m regression
+# P1 scenarios
+uv run pytest -m p1
 
 # Single feature
-pytest tests/features/add_transaction.feature
+uv run pytest tests/features/add_transaction.feature
 
 # With Allure report
-pytest --alluredir=./allure-results
+uv run pytest --alluredir=./allure-results
 allure serve ./allure-results
 ```
 
@@ -86,7 +89,7 @@ We focused on the **two highest-value features** of the user journey:
 | Feature | Sub-features | P0 | P1 | Total | Why chosen |
 |---------|--------------|----|----|-------|------------|
 | **Home → Add Transaction shortcut** | Add Expense / Income / Transfer; amount, category (+ custom), date, note, tags, photo upload | 4 | 1 | 5 | The primary entry point for recording any transaction; downstream data source for Home summary, Transactions list, and Analytics |
-| **Transactions list** | Filter by type (All / Expense / Income / Transfer); date-grouped summary | 2 | 0 | 2 | Validation surface — the same data must appear correctly here after Add |
+| **Transactions list** | Filter by type; date-grouped summary | 0 | 2 | 2 | Validation surface — the same data must appear correctly here after Add |
 
 ### Detailed Sub-feature Coverage
 
@@ -94,18 +97,18 @@ We focused on the **two highest-value features** of the user journey:
 
 | Sub-feature | Priority |
 |-------------|----------|
-| Add **Expense** transaction with: amount + category (mandatory, e.g. Food) + note ("breakfast with Dinna") + tags ("food,dinna") + date + photo attachment | P0 |
-| Add **Income** transaction with: amount + category (mandatory, e.g. Salary) + note ("fulltime salary") + tags ("fulltime salary") + date + photo attachment | P0 |
-| Add **Transfer** transaction with: amount + category (mandatory, e.g. Others) + note ("transfer amount from main account into sub account") + tags ("transfer") + date + photo attachment | P0 |
-| Add a **custom category** inline during Add Transaction flow | P1 |
-| Use the **new custom category** in an Expense transaction | P0 |
+| Add Expense with amount, Food category, note, tags, persistence, and Home summary assertions | P0 |
+| Add Income with amount, Salary category, tags, persistence, and Home summary assertions | P0 |
+| Add Transfer and verify it does not change current-month income or expense | P0 |
+| Reject an empty amount without creating a transaction or changing Home totals | P0 |
+| Create and use the custom category `baby cost` in the Add Transaction flow | P1 |
 
 #### Transactions list
 
 | Sub-feature | Priority |
 |-------------|----------|
-| Filter transactions by type (All / Expense / Income / Transfer) | P0 |
-| Transactions list is **summarized by date** (grouped sections per date) | P0 |
+| Filter an Expense from mixed Expense and Income data | P1 |
+| Group a transaction at `2025-05-06 9:00 AM` under `06 May 2025` | P1 |
 
 ### Out-of-scope features (and why)
 
@@ -123,47 +126,51 @@ See [`docs/Feature_Inventory.md`](docs/Feature_Inventory.md) for the full explor
 
 ```
 trackify-automation/
+├── .github/workflows/ci.yml        # Collection + gated Android E2E
 ├── docs/
-│   ├── Feature_Inventory.md        # Day 1 manual exploration
-│   ├── DESIGN.md                   # Architecture & decisions
-│   └── REFLECTION.md               # Honest strengths + weaknesses
+│   ├── DESIGN.md                   # Architecture and tradeoffs
+│   ├── Feature_Inventory.md        # Manual feature exploration
+│   ├── REFLECTION.md               # Outcomes and limitations
+│   ├── SCALING.md                  # Long-term scaling roadmap
+│   └── TECHNICAL_SPEC.md           # Implementation contract
 ├── tests/
 │   ├── features/
-│   │   ├── add_transaction.feature # Gherkin BDD cases (Home shortcut)
-│   │   └── transactions.feature    # Gherkin BDD cases (Transactions list)
+│   │   ├── add_transaction.feature # Five Add Transaction scenarios
+│   │   └── transactions.feature    # Filter and grouping scenarios
 │   ├── step_defs/                  # pytest-bdd step implementations
-│   └── conftest.py
+│   └── __init__.py
 ├── locator/
+│   ├── onboarding.yaml
 │   ├── home.yaml
 │   ├── add_transaction.yaml
 │   └── transactions.yaml
 ├── page/
 │   ├── base_page.py
+│   ├── onboarding_page.py
 │   ├── home_page.py
 │   ├── add_transaction_page.py
 │   └── transactions_page.py
 ├── flow/
+│   ├── app_setup_flow.py
 │   ├── add_transaction_flow.py
 │   └── transactions_flow.py
 ├── utils/
-│   ├── driver.py                   # Wrapped Appium driver
-│   └── ai_helper.py                # AI-assisted locator suggestions
-├── ai/
-│   ├── gen_cases.py                # LLM-generated case drafts
-│   └── triage.py                   # LLM-based failure triage
-├── assets/
-│   └── run_demo.mp4
+│   ├── config.py                   # Environment and pytest.ini config
+│   ├── driver.py                   # Appium driver factory
+│   ├── locator_loader.py           # YAML locator resolver
+│   └── system_dialogs.py           # Notification permission handling
 ├── data/
-│   └── test_data.yaml
-├── .github/workflows/ci.yml       # Minimal CI
-├── conftest.py
+│   ├── test_data.yaml
+│   └── test_cases_template.xlsx
+├── scripts/sync_engine.py
+├── report/                         # Generated screenshots (ignored)
+├── app/app-release.apk             # Local APK (ignored)
+├── conftest.py                     # Driver, reset, Pages, Flows, reporting
 ├── pytest.ini
-├── pyproject.toml
-├── README.md
-└── app-release.apk                 # Local (not committed)
+└── pyproject.toml
 ```
 
-### Architecture (3 Layers)
+### Layered Architecture
 
 ```
 Requirement → Feature Files (Gherkin)
@@ -183,11 +190,12 @@ Trackify App
 
 **Key principles**:
 
-- ❌ No `sleep()` in Page layer — all waits
-- ❌ No `driver.find_element()` outside `utils/driver.py`
-- ❌ No XPath as primary — AccessibilityID > ID > Class
-- ✅ Locator strategy in YAML, not Python
-- ✅ Each layer has **one** responsibility
+- Step definitions do not call Appium directly.
+- Flows own business expectations and compose Pages.
+- Pages own UI interaction and use explicit waits instead of fixed sleeps.
+- Locator values stay in YAML; scoped XPath is a fallback when Flutter exposes
+  no stable semantic identifier.
+- Every scenario starts from a clean package database and completes onboarding.
 
 ---
 
@@ -200,25 +208,26 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for full architectural justification.
 | BDD framework | pytest-bdd | behave | Stays inside pytest ecosystem |
 | Locator format | YAML | Python dict | Easier for non-devs to edit |
 | Reset DB | `pm clear` | App UI | Deterministic for automation |
-| Assert style | Allure attach | Plain logs | Visual evidence + easy review |
+| Failure evidence | Allure + PNG | Plain logs | Traceback plus visible app state |
 | Feature focus | Home + Transactions | Expense CRUD + Budget | Home is the primary entry point; Transactions validates downstream correctness |
 
 ---
 
 ## AI Usage
 
-I used AI tools **deliberately** at multiple stages to maximize signal within the 4-6 hour budget:
+AI assistance was used deliberately, with emulator evidence as the final source
+of truth:
 
-| Phase | What AI did | Why | Tool |
-|-------|-------------|-----|------|
-| **Day 1 Feature Inventory** | AI helped reason about which features to test | Expanded my reasoning to include offline risk + edge cases | ChatGPT (peripheral) |
-| **Day 2 BDD Case Generation** | AI drafted **7 Gherkin scenarios** which I reviewed, edited, and extended | Saved ~1.5h of writing | Claude / GPT-4o |
-| **Day 2 Locator Suggestion** | Fed screenshots to AI to confirm AccessibilityID choices for Flutter elements | Reduced trial-and-error with Flutter's semantic tree | Claude Vision |
-| **Day 3 Failure Triage** | LLM categorizes failure as Locator / App Bug / Env / Script / Data | Faster root cause | OpenAI |
-| **README drafting** | AI helped structure sections | Focus on testing logic, not wording | Claude |
-| **Tag/Note format conventions** | AI suggested Gherkin syntax for data tables (tags as comma-separated strings) | Standardized test data | Claude |
+| Phase | AI contribution | Human verification |
+|-------|-----------------|--------------------|
+| Scope and BDD design | Compared candidate journeys and refined seven scenarios | Checked against the explored app and specification |
+| Locator analysis | Interpreted Appium XML and screenshots to suggest stable selectors | Exercised every selector on the Android emulator |
+| Implementation | Drafted Page, Flow, fixture, and reporting changes | Reviewed diffs and ran focused plus full regression tests |
+| Debugging | Formed hypotheses for keyboard, category, date picker, and transition failures | Accepted changes only after reproducing and rerunning the failing path |
+| Documentation | Structured architecture and reflection material | Reconciled every claim with the repository and latest run |
 
-**Honest assessment**: AI made me faster, not smarter. I still drove every architectural decision and reviewed every line of AI output before committing.
+AI shortened investigation time, but live Appium behavior overruled generated
+assumptions whenever they disagreed.
 
 ---
 
@@ -228,23 +237,25 @@ After every run, see:
 
 - **Allure report**: `allure-report/index.html` (open in browser)
 - **Screenshots on failure**: `report/screenshots/`
-- **Recording**: `assets/run_demo.mp4`
 
-### Latest Run (placeholder — update after each run)
+### Latest Verified Run
 
 ```
-Passed: 6 / Failed: 0 / Skipped: 1
-Add Transaction: 4 0  (1 P1 skipped)
-Transactions:    2 0
+Passed: 7 / Failed: 0 / Skipped: 0
+Add Transaction: 5 passed
+Transactions:    2 passed
 ```
+
+Command: `uv run pytest --alluredir=./allure-results`
 
 ---
 
 ## iOS Extension Plan
 
-> I focused on Android for the 4-6 hour budget. Below is the plan to extend to iOS without changing the architecture.
+> The current suite is device-validated on Android. The existing platform
+> boundary allows an iOS extension without changing Gherkin or Flow behavior.
 
-### Step-by-step (estimate: 1-2 hours)
+### Step-by-step
 
 1. **Install iOS toolchain**
    ```bash
@@ -255,57 +266,61 @@ Transactions:    2 0
    ```bash
    appium driver install xcuitest
    ```
-3. **Open Runner.app in simulator**
+3. **Place and open Runner.app in the simulator**
    ```bash
+   mkdir -p app
+   cp -R /path/to/Runner.app app/Runner.app
    xcrun simctl boot "iPhone 16"
    open -a Simulator
    ```
-4. **Add iOS Locator to existing YAML**
+4. **Validate the iOS entries in each existing locator YAML**
    ```yaml
-   Add_Expense_Amount_Field:
+   amount_input:
      android:
-       accessibility_id: "Amount Input"
+       xpath: "//android.view.View[@content-desc='$']/android.widget.EditText"
      ios:
-       accessibility_id: "Amount Input"
+       xpath: "(//XCUIElementTypeTextField)[1]"
    ```
-5. **Add platform capability in conftest.py**
-   ```python
-   if platform == "ios":
-       caps["platformName"] = "iOS"
-       caps["app"] = "path/to/Runner.app"
+5. **Run with the existing configuration boundary**
+   ```bash
+   PLATFORM=ios \
+   APP_PATH="$PWD/app/Runner.app" \
+   DEVICE_NAME="iPhone 16" \
+   uv run pytest
    ```
-6. **Re-run the same feature files** — no `.feature` changes needed
+6. **Adapt native picker and back-navigation mechanics inside Pages only**
 
 ### Known iOS Flutter Differences
 
 | Issue | Android | iOS |
 |-------|---------|-----|
-| Element ID format | `com.trackify.app:id/amount` | `XCUIElementTypeTextField` |
-| Back navigation | Hardware / Software button | Edge swipe gesture |
-| Long press | `long_press` mobile action | `mobile:touchAndHold` |
-| Date picker | Native | Wheel picker (different XPath) |
-| Photo upload | File picker (gallery) | Photo library picker |
+| Semantic tree | UiAutomator2 classes | XCUIElementType classes |
+| Back navigation | Android button/navigation | iOS button or edge gesture |
+| Date/time picker | Android calendar/clock | iOS wheel or compact picker |
+| Permission dialog | Android runtime permission | iOS system alert |
 
-The **Locator YAML structure already supports per-platform** — only the iOS values need filling in.
+The iOS entries are placeholders until they are verified against a live
+simulator.
 
 ---
 
 ## CI
 
-Minimal GitHub Actions workflow at `.github/workflows/ci.yml`:
+The workflow at `.github/workflows/ci.yml` has two levels:
 
-- Trigger: push to `test` / pull_request
-- Steps: install Appium, start emulator, run pytest, upload Allure report as artifact
-- See the file for full config
+- Every push to `test`, pull request, and manual dispatch installs dependencies
+  and collects all seven scenarios.
+- Full Android E2E requires a repository secret named `TRACKIFY_APK_URL` that
+  points to a downloadable APK. This is necessary because the app binary is not
+  committed.
+- With that secret present, CI starts an API 34 emulator and Appium, runs pytest,
+  and uploads raw results, an HTML Allure report, failure screenshots, and
+  `appium.log` for 14 days.
+- Without the secret, the workflow emits an explicit notice and skips only the
+  mobile job steps; collection still gates the change.
 
 ---
 
 ## Honest Reflection
 
 See [`docs/REFLECTION.md`](docs/REFLECTION.md) for what I did well, what I'd do differently, and what I'd improve with more time.
-
----
-
-## License
-
-MIT — for educational evaluation purposes.

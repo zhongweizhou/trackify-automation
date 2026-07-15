@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - test
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trackify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.3.2
+
+      - name: Install Python dependencies
+        run: uv sync --python 3.11
+
+      - name: Collect BDD scenarios
+        run: uv run pytest --collect-only -q
+
+  mobile-e2e:
+    name: Android mobile E2E
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      APPIUM_SERVER_URL: http://127.0.0.1:4723
+      APP_PATH: ${{ github.workspace }}/app/app-release.apk
+      PLATFORM: android
+    steps:
+      - name: Check APK source
+        id: apk_source
+        shell: bash
+        env:
+          TRACKIFY_APK_URL: ${{ secrets.TRACKIFY_APK_URL }}
+        run: |
+          if [[ -n "${TRACKIFY_APK_URL}" ]]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::TRACKIFY_APK_URL is not configured; mobile E2E was skipped."
+          fi
+
+      - name: Check out repository
+        if: steps.apk_source.outputs.available == 'true'
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        if: steps.apk_source.outputs.available == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        if: steps.apk_source.outputs.available == 'true'
+        uses: astral-sh/setup-uv@v8.3.2
+
+      - name: Install Python dependencies
+        if: steps.apk_source.outputs.available == 'true'
+        run: uv sync --python 3.11
+
+      - name: Set up Node.js
+        if: steps.apk_source.outputs.available == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install Appium and Allure CLI
+        if: steps.apk_source.outputs.available == 'true'
+        run: |
+          npm install --global appium@3 allure-commandline@2.43.0
+          appium driver install uiautomator2
+
+      - name: Download Trackify APK
+        if: steps.apk_source.outputs.available == 'true'
+        shell: bash
+        env:
+          TRACKIFY_APK_URL: ${{ secrets.TRACKIFY_APK_URL }}
+        run: |
+          mkdir -p app
+          curl --fail --location --retry 3 \
+            "${TRACKIFY_APK_URL}" \
+            --output "${APP_PATH}"
+          test -s "${APP_PATH}"
+
+      - name: Run Android E2E tests
+        if: steps.apk_source.outputs.available == 'true'
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_6
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb install -r -t "${APP_PATH}"
+            appium --log appium.log --log-timestamp &
+            for attempt in {1..30}; do
+              if curl --fail --silent "${APPIUM_SERVER_URL}/status" > /dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            curl --fail --silent "${APPIUM_SERVER_URL}/status" > /dev/null
+            set +e
+            uv run pytest --alluredir=allure-results
+            test_exit=$?
+            set -e
+            allure generate allure-results --clean --output allure-report
+            exit "${test_exit}"
+
+      - name: Upload mobile test artifacts
+        if: always() && steps.apk_source.outputs.available == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: trackify-mobile-test-results
+          path: |
+            allure-results/
+            allure-report/
+            report/screenshots/
+            appium.log
+          if-no-files-found: warn
+          retention-days: 14

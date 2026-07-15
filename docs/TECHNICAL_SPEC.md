@@ -921,8 +921,37 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 | 11 | Allure + Screenshot on fail | `conftest.py` (add Allure metadata + `pytest_runtest_makereport` hooks) | `pytest --alluredir=./allure-results` produces results; on `call` failure the hook saves PNG to `report/screenshots/<test_name>.png` and attaches it to Allure — **do NOT wrap test bodies in try/except** (see §8 anti-patterns). Hook pattern: `pytest.hookimpl(tryfirst=True, hookwrapper=True) def pytest_runtest_makereport(item, call)` that yields and inspects the call report. | `feat(report): allure + screenshot on fail` |
 | 12 | CI + Reflection | `.github/workflows/ci.yml`, `docs/REFLECTION.md` | README links work; all commits squashed cleanly | `docs: reflection + ci + final polish` |
 
-**Optional Day 4 tasks** (if time permits):
-- **Task 13**: AI Triage (`ai/triage.py` triggered on test failure; categorizes failure as Locator / App Bug / Env / Script / Data)
+**Optional Day 4 task** (if time permits):
+- **Task 13**: AI Triage — when a pytest test fails, classify the failure into one of {**Locator**, **App Bug**, **Env**, **Script**, **Data**}, attach the verdict to the Allure report, and print a one-line console summary so the engineer knows where to look first. **Architecture (2-stage)**:
+  1. **Local heuristic** — regex match `error_msg + traceback` against `LOCAL_SIGNATURES` (see table below). If a category scores ≥ 0.7 confidence, return immediately. No network, <1 ms.
+  2. **LLM fallback** — if local confidence is low or no signature matched, call Claude API with `{test_name, error_msg, traceback, screenshot_path}`. Returns `{category, confidence, reasoning, next_action}`.
+
+  **Signature map** (regexes Codex MUST include in `ai/triage.py:LOCAL_SIGNATURES`):
+
+  | Category | Local regex signatures (case-insensitive) | Default `next_action` |
+  |----------|-------------------------------------------|------------------------|
+  | **Locator** | `NoSuchElementException`, `TimeoutException.*find`, `Unable to locate element`, `locator.*not found` | Check locator YAML for the failing element; rerun with `accessibility_id` fallback |
+  | **Env** | `ConnectionRef`, `adb.*not found`, `4723.*refused`, `Appium server.*not`, `device offline` | Verify Appium server is running on `:4723`; check `adb devices` |
+  | **Script** | `ImportError`, `ModuleNotFoundError`, `AttributeError`, `TypeError`, `AssertionError`, `NameError`, `IndentationError` | Read the traceback; fix the Python error directly |
+  | **App Bug** | `ANR`, `App crashed`, `not responding`, `java\.lang\.`, `has stopped`, `element.*not enabled`, `validation.*expected.*got` | Open the app on emulator; reproduce manually; file a bug if reproducible |
+  | **Data** | `KeyError.*test_data`, `missing.*required field`, `yaml.*not found`, `HiveError` | Check `data/test_data.yaml` has the required key; reset Hive DB if polluted |
+
+  **Files touched**: `ai/triage.py` (new, ~80 lines), `conftest.py` (extend Task 11's `pytest_runtest_makereport` hook with triage call AFTER the screenshot save).
+
+  **Acceptance criteria**:
+  - `python -c "from ai.triage import triage_failure; print(triage_failure({'error_msg': 'NoSuchElementException: ...', 'traceback': '...'}).category)"` returns `Locator`
+  - On a real pytest failure, the Allure report has an `AI Triage` JSON attachment containing `{category, confidence, reasoning, next_action}`
+  - Console prints `[AI Triage] <Category> (<NN%>): <reasoning>` immediately after the failure summary
+  - **Degrades gracefully**: missing `ANTHROPIC_API_KEY` env var → LLM stage returns `category='Unknown', confidence=0.0`, no exception, no crash
+  - Local heuristic runs without any network call (verifiable via `print('local hit')` instrumentation during dev)
+
+  **Out-of-scope for PoC** (Day 6+ ideas, listed here so Codex doesn't try):
+  - ❌ Multi-modal screenshot analysis (Claude Vision) — adds API cost, can flip on later via `--vision` flag
+  - ❌ Self-learning from engineer feedback ("I marked this as Locator but it was App Bug") — needs labeled dataset
+  - ❌ Caching across runs — flaky-test cache pollution risk
+  - ❌ Localization for non-English error messages
+
+  **Commit message**: `feat(ai): failure triage with local heuristic + LLM fallback`
 
 **Optional Day 5 task** (post-challenge extension):
 - **Task 14**: Excel ↔ .feature Sync Engine — `scripts/sync_engine.py` reads `data/test_cases.xlsx`, diffs against `tests/features/*.feature` by `scenario_id` comment, writes back only `added` / `modified` rows, leaves untouched scenarios byte-identical. `data/test_cases_template.xlsx` ships as the starting registry. See §11 for full design. Commit message: `feat(sync): excel ↔ feature sync engine PoC`.
