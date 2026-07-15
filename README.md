@@ -47,37 +47,147 @@ cd trackify-automation
 # Python deps (using uv)
 uv sync
 
-# Appium drivers
-npm install -g appium
+# Appium and Allure CLIs
+npm install -g appium allure-commandline
 appium driver install uiautomator2
-
-# Start Appium server in one terminal
-appium
 
 # Put the local APK in the ignored app directory, then install it
 mkdir -p app
 cp /path/to/app-release.apk app/app-release.apk
+adb devices
 adb install -r -t app/app-release.apk
+
+# Finally, start Appium in a dedicated terminal and leave it running
+appium
 ```
 
 ### Run Tests
 
+Real UI runs require a running Android device/emulator, `app/app-release.apk`,
+and an Appium server. Every business scenario clears the app database and
+completes the required onboarding (name, currency, Monthly budget, and Bank SMS
+Reader), so the full seven-scenario run takes several minutes.
+
+Commands below use `uv`. If the repository already has a `.venv` but `uv` is
+not installed, replace `uv run pytest` with
+`.venv/bin/python -m pytest`.
+
+#### Full suite
+
 ```bash
-# All tests
+# Run all 7 BDD scenarios
 uv run pytest
 
-# Smoke only (P0)
-uv run pytest -m smoke
+# Concise output
+uv run pytest -q
+```
 
-# P1 scenarios
-uv run pytest -m p1
+#### By feature
 
-# Single feature
-uv run pytest tests/features/add_transaction.feature
+```bash
+# 5 Add Transaction scenarios
+uv run pytest tests/features/add_transaction.feature -q
 
-# With Allure report
-uv run pytest --alluredir=./allure-results
+# 2 Transactions scenarios
+uv run pytest tests/features/transactions.feature -q
+```
+
+#### By priority or function marker
+
+```bash
+# 4 P0 smoke scenarios
+uv run pytest -m smoke -q
+uv run pytest -m p0 -q
+
+# 3 P1 scenarios
+uv run pytest -m p1 -q
+
+# One targeted workflow
+uv run pytest -m custom_category -q
+uv run pytest -m filter -q
+uv run pytest -m grouping -q
+
+# All current priorities
+uv run pytest -m "p0 or p1" -q
+```
+
+`regression` is registered in `pytest.ini`, but no scenario currently has the
+`@regression` tag. `uv run pytest -m regression` therefore collects zero tests.
+
+#### One scenario
+
+Use a generated test-name substring with `-k`:
+
+```bash
+uv run pytest -k "add_expense_happy_path" -q
+```
+
+Available selectors:
+
+```text
+add_expense_happy_path
+add_income_happy_path
+add_transfer_happy_path
+validation__empty_amount_shows_error_and_does_not_save
+add_expense_with_new_custom_category_created_in_flow
+filter_transactions_by_type_shows_only_matching_type
+transactions_grouped_by_date_with_section_headers
+```
+
+#### Collection only
+
+This validates imports, Gherkin parsing, markers, and step matching without
+starting Appium or executing a scenario:
+
+```bash
+uv run pytest --collect-only -q
+```
+
+#### Allure results and failure screenshots
+
+```bash
+uv run pytest \
+  --alluredir=./allure-results \
+  --clean-alluredir
+
+# Open a temporary report server
 allure serve ./allure-results
+
+# Or generate a static report
+allure generate ./allure-results --clean -o ./allure-report
+open ./allure-report/index.html
+```
+
+Call-stage failures automatically save PNG evidence under
+`report/screenshots/` and attach it to the corresponding Allure result.
+
+#### Failure-focused and debug runs
+
+```bash
+# Stop on the first failure
+uv run pytest -x -vv
+
+# Stop after one failure
+uv run pytest --maxfail=1 -vv
+
+# Rerun only failures from the previous pytest run
+uv run pytest --lf -vv
+
+# Disable output capture while debugging
+uv run pytest -s -vv
+```
+
+#### Override the local Appium target
+
+Defaults already point to Android, `app/app-release.apk`, and
+`http://127.0.0.1:4723`. Override them when using another local target:
+
+```bash
+PLATFORM=android \
+APP_PATH="$PWD/app/app-release.apk" \
+DEVICE_NAME="Android Emulator" \
+APPIUM_SERVER_URL="http://127.0.0.1:4723" \
+uv run pytest
 ```
 
 ---
@@ -116,7 +226,7 @@ We focused on the **two highest-value features** of the user journey:
 |---------|--------|
 | Analytics / charts | Visual-heavy, low-assertion-ROI; DOM structure unstable |
 | Settings | Configuration-heavy, low business logic depth |
-| Budget Management | **Does not exist in current Trackify build** (confirmed via full-app search) |
+| Budget configuration as a standalone journey | Monthly budget exists in first-run onboarding and is verified through Home summary calculations; no separate Budget Management scenario was selected |
 
 See [`docs/Feature_Inventory.md`](docs/Feature_Inventory.md) for the full exploration notes.
 
