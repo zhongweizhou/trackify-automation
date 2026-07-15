@@ -202,14 +202,17 @@ class AddTransactionFlow:
         normalized_name = shortcut_name.strip().lower()
         if normalized_name == "add expense":
             self._home_page.click_add_expense()
+            self._add_transaction_page.verify_visible()
             self._add_transaction_page.select_type("expense")
             self._begin_draft("expense")
         elif normalized_name == "add income":
             self._home_page.click_add_income()
+            self._add_transaction_page.verify_visible()
             self._add_transaction_page.select_type("income")
             self._begin_draft("income")
         elif normalized_name == "add transfer":
             self._home_page.click_add_transfer()
+            self._add_transaction_page.verify_visible()
             self._add_transaction_page.select_type("transfer")
             self._begin_draft("transfer")
         elif normalized_name == "add new category":
@@ -295,6 +298,8 @@ class AddTransactionFlow:
         """Submit the Add Transaction form."""
         expectation = self._build_saved_expectation()
         self._add_transaction_page.tap_save()
+        if expectation is not None:
+            self._home_page.verify_visible()
         self._saved_transaction = expectation
 
     def assert_amount_error(self, message: str) -> None:

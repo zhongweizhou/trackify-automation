@@ -19,6 +19,7 @@ from page.onboarding_page import OnboardingPage
 from page.transactions_page import TransactionsPage
 
 PKG = os.getenv("ANDROID_PACKAGE", "com.blixcode.trackify")
+pytest_plugins = ("tests.step_defs.common_steps",)
 
 
 class FeatureFile(pytest.File):
