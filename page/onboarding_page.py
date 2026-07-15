@@ -45,6 +45,7 @@ class OnboardingPage(BasePage):
         name_input.clear()
         name_input.send_keys(name)
         self._tap_locator(self._loc("name_page"))
+        self._hide_keyboard_if_present()
         self._tap_locator(self._loc("continue_button"))
         self.wait_for(self._loc("budget_page"))
 
@@ -163,6 +164,13 @@ class OnboardingPage(BasePage):
 
     def _tap_point(self, x: int, y: int) -> None:
         self._driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
+
+    def _hide_keyboard_if_present(self) -> None:
+        try:
+            if self._driver.is_keyboard_shown():
+                self._driver.hide_keyboard()
+        except WebDriverException:
+            pass
 
     @staticmethod
     def _parse_budget(monthly_budget: int | str) -> int:
