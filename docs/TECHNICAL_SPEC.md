@@ -690,7 +690,7 @@ Given user is on the Add Transaction page
 Given user is on the Transactions page
 ```
 
-#### When phrases (10 actions)
+#### When phrases (12 actions)
 
 ```gherkin
 When user selects type "<type:str>"                  # type ∈ {expense, income, transfer}
@@ -698,6 +698,8 @@ When user enters amount "<amount:float>"
 When user leaves amount empty
 When user selects category "<category:str>"
 When user enters note "<note:str>"
+When user enters tags "<tags:str>"
+When user selects transaction date and time "<date_time:str>"
 When user taps Save
 When user taps Cancel
 When user taps "Add new category"
@@ -727,10 +729,12 @@ Then transactions are grouped by date with section headers
 | `<amount:float>` | `float` | `100.0`, `9.99` | Must be `> 0` (asserted in Flow) |
 | `<category:str>` | `str` | `"Food"`, `"Transport"` | Free text |
 | `<note:str>` | `str` | `"breakfast with Dinna"` | Free text |
+| `<tags:str>` | `str` | `"food,breakfast"` | Non-empty comma-separated tag text |
 | `<name:str>` | `str` | `"baby cost"` | Free text |
 | `<currency:str>` | `str` | `"$ US Dollar"` | Full visible option label |
 | `<monthly_budget:int>` | `int` | `30000` | Must be a positive whole number and match the displayed slider value |
 | `<message:str>` | `str` | `"Amount is required"` | Substring match against displayed text |
+| `<date_time:str>` | `str` | `"20250506 9:00 AM"` | Local date/time in `YYYYMMDD h:mm AM/PM` format |
 
 **Add Transaction post-save assertion rules**:
 - Capture the date and time displayed on Add Transaction before tapping Save. The Transactions assertion must find one row under the corresponding date containing the same formatted amount, category, and time.
@@ -763,6 +767,7 @@ Feature: Add Transaction
     And user enters amount "100"
     And user selects category "Food"
     And user enters note "breakfast"
+    And user enters tags "food,breakfast"
     And user taps Save
     Then transaction appears in Recent transactions with amount "100.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
@@ -773,6 +778,7 @@ Feature: Add Transaction
     When user taps "Add Income"
     And user enters amount "5000"
     And user selects category "Salary"
+    And user enters tags "salary,work"
     And user taps Save
     Then transaction appears in Recent transactions with amount "5000.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
@@ -783,6 +789,7 @@ Feature: Add Transaction
     When user taps "Add Transfer"
     And user enters amount "200"
     And user selects category "Food"
+    And user enters tags "transfer"
     And user taps Save
     Then transaction appears in Recent transactions with amount "200.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
@@ -805,6 +812,7 @@ Feature: Add Transaction
     And user enters amount "50"
     And user taps "Add new category"
     And user creates custom category "baby cost"
+    And user enters tags "baby,family"
     And user taps Save
     Then transaction appears in Recent transactions with amount "50.0"
     And no transaction appears in Recent transactions with category "baby cost" missing
@@ -840,7 +848,11 @@ Feature: Transactions List
 
   @p1 @grouping
   Scenario: Transactions grouped by date with section headers
-    When user adds an expense "100" with category "Food"
+    When user taps "Add Expense"
+    And user enters amount "100"
+    And user selects category "Food"
+    And user selects transaction date and time "20250506 9:00 AM"
+    And user taps Save
     And user navigates to the Transactions page
     Then transactions are grouped by date with section headers
 ```
@@ -894,7 +906,7 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 | 8a | First-run setup baseline | `locator/onboarding.yaml`, `page/onboarding_page.py`, `flow/app_setup_flow.py`, `conftest.py`, BDD `Background` blocks | Every business scenario completes `Kimbal` → `$ US Dollar` + `30000` → Bank SMS Reader enabled + `Get Started`; no test path taps onboarding `Skip`; Home shows `Kimbal` and `$` before business actions | `feat(setup): complete required first-run configuration` |
 | 8b | Remaining Add Transaction scenarios | `tests/features/add_transaction.feature`, `tests/step_defs/add_transaction_steps.py` | Un-skip the remaining **4 scenarios** from §6.7 (Add Income, Add Transfer, Validation, Custom Category). Implement the additional §6.6 phrases (`user selects type`, `user taps "Add new category"`, `user creates custom category`, `error message ... is shown for amount`, `no transaction appears ...`). Custom Category creates and selects `baby cost` with any icon/color. All **5 Add Transaction scenarios** pass. | `test(case): add transaction bdd (4 more scenarios + custom category)` |
 | 8c | Transaction persistence and Home summary assertions | `locator/home.yaml`, `locator/transactions.yaml`, `page/base_page.py`, `page/home_page.py`, `page/transactions_page.py`, `page/add_transaction_page.py`, `flow/add_transaction_flow.py`, `utils/system_dialogs.py`, Add Transaction BDD files | Every Add Transaction scenario verifies the matching Transactions date/amount/category/time and the `This Month` income, expense, balance, and half-up integer percentage. Transfer has no summary impact. Notification permission prompts are accepted globally. | `test(case): verify transaction persistence and monthly summary` |
-| 9 | Transactions page + flow | `page/transactions_page.py`, `flow/transactions_flow.py`, `locator/transactions.yaml` | Manual test: filter + group-by-date works | `feat(page): transactions page + flow` |
+| 9 | Transactions page + flow | `page/transactions_page.py`, `flow/transactions_flow.py`, `locator/transactions.yaml`, Add Transaction date/time Page/Flow locators, `conftest.py` | Manual test: filter works and a transaction at `2025-05-06 9:00 AM` is grouped under `06 May 2025` | `feat(page): transactions page + flow` |
 | 10 | Transactions BDD | `tests/features/transactions.feature`, `tests/step_defs/transactions_steps.py` | Both Transactions scenarios from §6.7 collect and run: filter by type (`@filter`), group-by-date (`@grouping`). Implement the additional §6.6 phrases (`user filters transactions by type`, `only transactions of type ... are shown`, `transactions are grouped by date ...`). **Total project: 5 Add Transaction + 2 Transactions = 7 scenarios**. | `test(case): transactions bdd (2 scenarios)` |
 | 11 | Allure + Summary + Screenshot on fail | `conftest.py` (add `pytest_runtest_makereport` hook + Allure fixture), `report/summary.xlsx` generator | `pytest --alluredir=./allure-results` produces results; on `call` failure the hook saves PNG to `report/screenshots/<test_name>.png` and attaches it to Allure — **do NOT wrap test bodies in try/except** (see §8 anti-patterns). Hook pattern: `pytest.hookimpl(tryfirst=True, hookwrapper=True) def pytest_runtest_makereport(item, call)` that yields and inspects `outcome.excinfo`. | `feat(report): allure + summary + screenshot on fail` |
 | 12 | CI + Reflection | `.github/workflows/ci.yml`, `docs/REFLECTION.md` | README links work; all commits squashed cleanly | `docs: reflection + ci + final polish` |

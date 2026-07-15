@@ -12,6 +12,7 @@ import pytest
 
 from flow.add_transaction_flow import AddTransactionFlow
 from flow.app_setup_flow import AppSetupFlow
+from flow.transactions_flow import TransactionsFlow
 from page.add_transaction_page import AddTransactionPage
 from page.home_page import HomePage
 from page.onboarding_page import OnboardingPage
@@ -189,6 +190,19 @@ def add_transaction_flow(
         Flow object composed from page fixtures.
     """
     return AddTransactionFlow(home_page, add_transaction_page, transactions_page)
+
+
+@pytest.fixture
+def transactions_flow(transactions_page: TransactionsPage) -> TransactionsFlow:
+    """Create a Transactions business flow for the current test.
+
+    Args:
+        transactions_page: Transactions page fixture.
+
+    Returns:
+        Flow object for filtering and verifying transaction groups.
+    """
+    return TransactionsFlow(transactions_page)
 
 
 def _adb() -> str:

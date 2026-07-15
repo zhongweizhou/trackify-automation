@@ -5,6 +5,34 @@ page_title:
   ios:
     accessibility_id: "Transactions"
 
+type_filter:
+  description: "Transaction type filter chip"
+  android:
+    accessibility_id: "{filter_label}"
+  ios:
+    accessibility_id: "{filter_label}"
+
+transaction_rows:
+  description: "Visible transaction rows containing a signed amount and time"
+  android:
+    xpath: "//android.view.View[@clickable='false' and contains(@content-desc, '$') and (contains(@content-desc, ' AM') or contains(@content-desc, ' PM'))]"
+  ios:
+    predicate: "label CONTAINS '$' AND (label CONTAINS ' AM' OR label CONTAINS ' PM')"
+
+date_section:
+  description: "Transaction date section and its net amount summary"
+  android:
+    xpath: "//android.view.View[@clickable='false' and starts-with(@content-desc, '{date_label}') and contains(@content-desc, '$')]"
+  ios:
+    predicate: "label BEGINSWITH '{date_label}' AND label CONTAINS '$'"
+
+date_section_candidates:
+  description: "Nodes that may contain a date section or transaction row"
+  android:
+    xpath: "//android.view.View[@clickable='false' and contains(@content-desc, '$')]"
+  ios:
+    predicate: "label CONTAINS '$'"
+
 transaction_entry:
   description: "Merged date group and transaction row matching all details"
   android:

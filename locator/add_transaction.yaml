@@ -124,6 +124,83 @@ date_picker_trigger:
   ios:
     predicate: "label CONTAINS '/'"
 
+date_dialog:
+  description: "Date picker dialog"
+  android:
+    xpath: "//*[contains(@content-desc, 'Select date')]"
+  ios:
+    predicate: "label CONTAINS 'Select date'"
+
+select_year_button:
+  description: "Date picker month/year header"
+  android:
+    accessibility_id: "Select year\n{month_year}"
+  ios:
+    accessibility_id: "Select year\n{month_year}"
+
+year_option:
+  description: "Year option in the date picker"
+  android:
+    accessibility_id: "{year}"
+  ios:
+    accessibility_id: "{year}"
+
+previous_month_button:
+  description: "Show the previous calendar month"
+  android:
+    accessibility_id: "Previous month"
+  ios:
+    accessibility_id: "Previous month"
+
+next_month_button:
+  description: "Show the next calendar month"
+  android:
+    accessibility_id: "Next month"
+  ios:
+    accessibility_id: "Next month"
+
+day_option:
+  description: "Exact calendar day option"
+  android:
+    accessibility_id: "{day_label}"
+  ios:
+    accessibility_id: "{day_label}"
+
+dialog_ok_button:
+  description: "Confirm the date or time picker"
+  android:
+    accessibility_id: "OK"
+  ios:
+    accessibility_id: "OK"
+
+time_text_mode_button:
+  description: "Switch the time picker to text fields"
+  android:
+    accessibility_id: "Switch to text input mode"
+  ios:
+    accessibility_id: "Switch to text input mode"
+
+time_hour_input:
+  description: "Hour field in the text time picker"
+  android:
+    xpath: "//android.widget.EditText[@hint='Hour']"
+  ios:
+    xpath: "//XCUIElementTypeTextField[@placeholderValue='Hour']"
+
+time_minute_input:
+  description: "Minute field in the text time picker"
+  android:
+    xpath: "//android.widget.EditText[@hint='Minute']"
+  ios:
+    xpath: "//XCUIElementTypeTextField[@placeholderValue='Minute']"
+
+time_meridiem_option:
+  description: "AM or PM option in the time picker"
+  android:
+    accessibility_id: "{meridiem}"
+  ios:
+    accessibility_id: "{meridiem}"
+
 save_button:
   description: "Submit the transaction"
   android:

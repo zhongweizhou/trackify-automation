@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from calendar import month_name
+from datetime import datetime
 
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
@@ -106,6 +108,7 @@ class AddTransactionPage(BasePage):
             amount: Transaction amount to type into the amount field.
         """
         self._input_text(self._loc("amount_input"), str(amount))
+        self._complete_keyboard_input()
         self._amount_left_empty = False
 
     def leave_amount_empty(self) -> None:
@@ -147,6 +150,7 @@ class AddTransactionPage(BasePage):
         name_input = self.wait_for(self._loc("custom_category_name_input"))
         name_input.clear()
         name_input.send_keys(name)
+        self._complete_keyboard_input()
         entered_name = self.wait_for(
             self._loc("custom_category_name_input")
         ).get_attribute("text")
@@ -169,6 +173,7 @@ class AddTransactionPage(BasePage):
             note: Note text to type.
         """
         self._input_text(self._loc("notes_input"), note)
+        self._complete_keyboard_input()
 
     def enter_tags(self, tags: str) -> None:
         """Enter comma-separated tags for the transaction.
@@ -177,6 +182,12 @@ class AddTransactionPage(BasePage):
             tags: Tags text to type.
         """
         self._input_text(self._loc("tags_input"), tags)
+        self._complete_keyboard_input()
+        entered_tags = self.wait_for(self._loc("tags_input")).get_attribute("text")
+        if entered_tags != tags:
+            raise AssertionError(
+                f"Tags input contains {entered_tags!r}, expected {tags!r}."
+            )
 
     def selected_date_time(self) -> str:
         """Return the date and time currently selected on the form."""
@@ -186,6 +197,36 @@ class AddTransactionPage(BasePage):
         if not value:
             raise AssertionError("Add Transaction date/time is empty.")
         return value
+
+    def select_date_time(self, selected_at: datetime) -> None:
+        """Set an exact transaction date and time through the native pickers.
+
+        Args:
+            selected_at: Target local date and time, precise to the minute.
+
+        Raises:
+            AssertionError: If the form does not retain the selected value.
+        """
+        target = selected_at.replace(second=0, microsecond=0)
+        current = datetime.strptime(
+            " ".join(self.selected_date_time().split()),
+            "%d/%m/%Y %H:%M",
+        )
+        self._blur_keyboard_if_needed()
+        self._tap_locator(self._loc("date_picker_trigger"))
+        self.wait_for(self._loc("date_dialog"))
+        self._select_calendar_date(current, target)
+        self._select_clock_time(target)
+
+        actual = datetime.strptime(
+            " ".join(self.selected_date_time().split()),
+            "%d/%m/%Y %H:%M",
+        )
+        if actual != target:
+            raise AssertionError(
+                f"Date/time picker retained {actual!s}, expected {target!s}."
+            )
+        self.wait_for(self._loc("save_button"))
 
     def tap_save(self) -> None:
         """Submit the Add Transaction form."""
@@ -305,6 +346,86 @@ class AddTransactionPage(BasePage):
             )
             self._scroll_category_into_view(category_locator)
         self._tap_locator(category_locator)
+
+    def _select_calendar_date(self, current: datetime, target: datetime) -> None:
+        current_month_year = self._month_year(current.month, current.year)
+        if current.year != target.year:
+            self._tap_locator(
+                self._loc("select_year_button", month_year=current_month_year)
+            )
+            self._tap_locator(self._loc("year_option", year=str(target.year)))
+            current_month_year = self._month_year(current.month, target.year)
+            self.wait_for(
+                self._loc("select_year_button", month_year=current_month_year)
+            )
+
+        month_delta = target.month - current.month
+        month_locator_key = (
+            "next_month_button" if month_delta > 0 else "previous_month_button"
+        )
+        direction = 1 if month_delta > 0 else -1
+        for step in range(abs(month_delta)):
+            self._tap_locator(self._loc(month_locator_key))
+            displayed_month = current.month + direction * (step + 1)
+            self.wait_for(
+                self._loc(
+                    "select_year_button",
+                    month_year=self._month_year(displayed_month, target.year),
+                )
+            )
+
+        day_label = (
+            f"{target.day}, {target.strftime('%A, %B')} "
+            f"{target.day}, {target.year}"
+        )
+        self._tap_locator(self._loc("day_option", day_label=day_label))
+        self._tap_locator(self._loc("dialog_ok_button"))
+        self.wait_for(self._loc("time_text_mode_button"))
+
+    def _select_clock_time(self, target: datetime) -> None:
+        self._tap_locator(self._loc("time_text_mode_button"))
+        hour = target.strftime("%I").lstrip("0")
+        self._replace_time_value(self._loc("time_hour_input"), hour)
+        self._replace_time_value(
+            self._loc("time_minute_input"),
+            target.strftime("%M"),
+        )
+        self._tap_locator(
+            self._loc("time_meridiem_option", meridiem=target.strftime("%p"))
+        )
+        self._tap_locator(self._loc("dialog_ok_button"))
+
+    def _replace_time_value(self, locator: Locator, value: str) -> None:
+        element = self.wait_for(locator)
+        element.click()
+        if self._platform == "android":
+            element.clear()
+            element.send_keys(value)
+            self._driver.execute_script(
+                "mobile: performEditorAction",
+                {"action": "done"},
+            )
+            updated_value = self.wait_for(locator).get_attribute("text")
+            if updated_value != value:
+                raise AssertionError(
+                    f"Time field contains {updated_value!r}, expected {value!r}."
+                )
+            return
+        element.clear()
+        element.send_keys(value)
+
+    def _complete_keyboard_input(self) -> None:
+        if self._platform != "android":
+            return
+        self._driver.execute_script(
+            "mobile: performEditorAction",
+            {"action": "done"},
+        )
+        self._keyboard_needs_blur = False
+
+    @staticmethod
+    def _month_year(month: int, year: int) -> str:
+        return f"{month_name[month]} {year}"
 
     def _blur_keyboard_if_needed(self) -> None:
         if not self._keyboard_needs_blur:
