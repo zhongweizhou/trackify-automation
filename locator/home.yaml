@@ -1,0 +1,6 @@
+x:
+  description: "Task 4 skeleton locator used to validate the YAML loader"
+  android:
+    accessibility_id: "Home"
+  ios:
+    accessibility_id: "Home"
