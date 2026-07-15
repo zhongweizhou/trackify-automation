@@ -1,0 +1,83 @@
+page_title:
+  description: "Add Transaction page title"
+  android:
+    accessibility_id: "Add Transaction"
+  ios:
+    accessibility_id: "Add Transaction"
+
+type_toggle_expense:
+  description: "Tab to select Expense type"
+  android:
+    accessibility_id: "Expense"
+  ios:
+    accessibility_id: "Expense"
+
+type_toggle_income:
+  description: "Tab to select Income type"
+  android:
+    accessibility_id: "Income"
+  ios:
+    accessibility_id: "Income"
+
+type_toggle_transfer:
+  description: "Tab to select Transfer type"
+  android:
+    accessibility_id: "Transfer"
+  ios:
+    accessibility_id: "Transfer"
+
+amount_input:
+  description: "Numeric amount field nested under the rupee currency prefix"
+  android:
+    xpath: "//android.view.View[@content-desc='₹']/android.widget.EditText"
+  ios:
+    xpath: "(//XCUIElementTypeTextField)[1]"
+
+category_label:
+  description: "Category section label on the Add Transaction form"
+  android:
+    accessibility_id: "Category"
+  ios:
+    accessibility_id: "Category"
+
+category_option:
+  description: "Category option selected by visible category name"
+  android:
+    xpath: "//*[@content-desc='{category}']"
+  ios:
+    predicate: "label == '{category}'"
+
+notes_input:
+  description: "Second text input on the form; free-text note field"
+  android:
+    xpath: "(//android.widget.EditText)[2]"
+  ios:
+    xpath: "(//XCUIElementTypeTextField)[2]"
+
+tags_input:
+  description: "Third text input on the form; comma-separated tags field"
+  android:
+    xpath: "(//android.widget.EditText)[3]"
+  ios:
+    xpath: "(//XCUIElementTypeTextField)[3]"
+
+date_picker_trigger:
+  description: "Date/time selector on the Add Transaction form"
+  android:
+    xpath: "//*[contains(@content-desc, '/')]"
+  ios:
+    predicate: "label CONTAINS '/'"
+
+save_button:
+  description: "Submit the transaction"
+  android:
+    accessibility_id: "Save Transaction"
+  ios:
+    accessibility_id: "Save Transaction"
+
+amount_error_message:
+  description: "Inline error when amount is empty or invalid"
+  android:
+    xpath: "//*[contains(@content-desc, 'Amount') and contains(@content-desc, 'required')]"
+  ios:
+    predicate: "label CONTAINS 'Amount' AND label CONTAINS 'required'"
