@@ -103,7 +103,6 @@ trackify-automation/
 ├── report/
 │   ├── allure-results/              # Generated each run
 │   ├── screenshots/                 # Generated on failure
-│   └── summary.xlsx                 # One-glance pass/fail
 │
 └── assets/
     └── run_demo.mp4                 # Screen recording of a successful run
@@ -919,7 +918,7 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 | 8c | Transaction persistence and Home summary assertions | `locator/home.yaml`, `locator/transactions.yaml`, `page/base_page.py`, `page/home_page.py`, `page/transactions_page.py`, `page/add_transaction_page.py`, `flow/add_transaction_flow.py`, `utils/system_dialogs.py`, Add Transaction BDD files | Every Add Transaction scenario verifies the matching Transactions date/amount/category/time and the `This Month` income, expense, balance, and half-up integer percentage. Transfer has no summary impact. Notification permission prompts are accepted globally. | `test(case): verify transaction persistence and monthly summary` |
 | 9 | Transactions page + flow | `page/transactions_page.py`, `flow/transactions_flow.py`, `locator/transactions.yaml`, Add Transaction date/time Page/Flow locators, `conftest.py` | Manual test: filter works and a transaction at `2025-05-06 9:00 AM` is grouped under `06 May 2025` | `feat(page): transactions page + flow` |
 | 10 | Transactions BDD | `tests/features/transactions.feature`, `tests/step_defs/transactions_steps.py` | Both Transactions scenarios from §6.7 collect and run: filter by type (`@filter`), group-by-date (`@grouping`). Implement the additional §6.6 phrases (`user filters transactions by type`, `only transactions of type ... are shown`, `transactions are grouped by date ...`). **Total project: 5 Add Transaction + 2 Transactions = 7 scenarios**. | `test(case): transactions bdd (2 scenarios)` |
-| 11 | Allure + Summary + Screenshot on fail | `conftest.py` (add `pytest_runtest_makereport` hook + Allure fixture), `report/summary.xlsx` generator | `pytest --alluredir=./allure-results` produces results; on `call` failure the hook saves PNG to `report/screenshots/<test_name>.png` and attaches it to Allure — **do NOT wrap test bodies in try/except** (see §8 anti-patterns). Hook pattern: `pytest.hookimpl(tryfirst=True, hookwrapper=True) def pytest_runtest_makereport(item, call)` that yields and inspects `outcome.excinfo`. | `feat(report): allure + summary + screenshot on fail` |
+| 11 | Allure + Screenshot on fail | `conftest.py` (add Allure metadata + `pytest_runtest_makereport` hooks) | `pytest --alluredir=./allure-results` produces results; on `call` failure the hook saves PNG to `report/screenshots/<test_name>.png` and attaches it to Allure — **do NOT wrap test bodies in try/except** (see §8 anti-patterns). Hook pattern: `pytest.hookimpl(tryfirst=True, hookwrapper=True) def pytest_runtest_makereport(item, call)` that yields and inspects the call report. | `feat(report): allure + screenshot on fail` |
 | 12 | CI + Reflection | `.github/workflows/ci.yml`, `docs/REFLECTION.md` | README links work; all commits squashed cleanly | `docs: reflection + ci + final polish` |
 
 **Optional Day 4 tasks** (if time permits):

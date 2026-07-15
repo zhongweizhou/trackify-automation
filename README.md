@@ -227,7 +227,6 @@ I used AI tools **deliberately** at multiple stages to maximize signal within th
 After every run, see:
 
 - **Allure report**: `allure-report/index.html` (open in browser)
-- **Summary Excel**: `report/summary.xlsx` (one-glance pass / fail)
 - **Screenshots on failure**: `report/screenshots/`
 - **Recording**: `assets/run_demo.mp4`
 
