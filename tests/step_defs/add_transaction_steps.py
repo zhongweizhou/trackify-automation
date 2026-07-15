@@ -151,6 +151,20 @@ def user_enters_note(
     add_transaction_flow.enter_note(note)
 
 
+@when(parsers.parse('user enters tags "{tags}"'))
+def user_enters_tags(
+    add_transaction_flow: AddTransactionFlow,
+    tags: str,
+) -> None:
+    """Enter comma-separated tags on the Add Transaction form.
+
+    Args:
+        add_transaction_flow: Add Transaction business flow fixture.
+        tags: Tags supplied by the Gherkin scenario.
+    """
+    add_transaction_flow.enter_tags(tags)
+
+
 @when(parsers.parse('user creates custom category "{name}"'))
 def user_creates_custom_category(
     add_transaction_flow: AddTransactionFlow,

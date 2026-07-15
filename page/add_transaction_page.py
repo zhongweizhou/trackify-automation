@@ -183,6 +183,11 @@ class AddTransactionPage(BasePage):
         """
         self._input_text(self._loc("tags_input"), tags)
         self._complete_keyboard_input()
+        entered_tags = self.wait_for(self._loc("tags_input")).get_attribute("text")
+        if entered_tags != tags:
+            raise AssertionError(
+                f"Tags input contains {entered_tags!r}, expected {tags!r}."
+            )
 
     def selected_date_time(self) -> str:
         """Return the date and time currently selected on the form."""

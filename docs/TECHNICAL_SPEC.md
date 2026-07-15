@@ -690,7 +690,7 @@ Given user is on the Add Transaction page
 Given user is on the Transactions page
 ```
 
-#### When phrases (11 actions)
+#### When phrases (12 actions)
 
 ```gherkin
 When user selects type "<type:str>"                  # type ∈ {expense, income, transfer}
@@ -698,6 +698,7 @@ When user enters amount "<amount:float>"
 When user leaves amount empty
 When user selects category "<category:str>"
 When user enters note "<note:str>"
+When user enters tags "<tags:str>"
 When user selects transaction date and time "<date_time:str>"
 When user taps Save
 When user taps Cancel
@@ -728,6 +729,7 @@ Then transactions are grouped by date with section headers
 | `<amount:float>` | `float` | `100.0`, `9.99` | Must be `> 0` (asserted in Flow) |
 | `<category:str>` | `str` | `"Food"`, `"Transport"` | Free text |
 | `<note:str>` | `str` | `"breakfast with Dinna"` | Free text |
+| `<tags:str>` | `str` | `"food,breakfast"` | Non-empty comma-separated tag text |
 | `<name:str>` | `str` | `"baby cost"` | Free text |
 | `<currency:str>` | `str` | `"$ US Dollar"` | Full visible option label |
 | `<monthly_budget:int>` | `int` | `30000` | Must be a positive whole number and match the displayed slider value |
@@ -765,6 +767,7 @@ Feature: Add Transaction
     And user enters amount "100"
     And user selects category "Food"
     And user enters note "breakfast"
+    And user enters tags "food,breakfast"
     And user taps Save
     Then transaction appears in Recent transactions with amount "100.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
@@ -775,6 +778,7 @@ Feature: Add Transaction
     When user taps "Add Income"
     And user enters amount "5000"
     And user selects category "Salary"
+    And user enters tags "salary,work"
     And user taps Save
     Then transaction appears in Recent transactions with amount "5000.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
@@ -785,6 +789,7 @@ Feature: Add Transaction
     When user taps "Add Transfer"
     And user enters amount "200"
     And user selects category "Food"
+    And user enters tags "transfer"
     And user taps Save
     Then transaction appears in Recent transactions with amount "200.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
@@ -807,6 +812,7 @@ Feature: Add Transaction
     And user enters amount "50"
     And user taps "Add new category"
     And user creates custom category "baby cost"
+    And user enters tags "baby,family"
     And user taps Save
     Then transaction appears in Recent transactions with amount "50.0"
     And no transaction appears in Recent transactions with category "baby cost" missing

@@ -260,6 +260,17 @@ class AddTransactionFlow:
         """
         self._add_transaction_page.enter_note(note)
 
+    def enter_tags(self, tags: str) -> None:
+        """Enter comma-separated transaction tags.
+
+        Args:
+            tags: Tags text such as ``food,breakfast``.
+        """
+        cleaned_tags = tags.strip()
+        if not cleaned_tags:
+            raise ValueError("Tags cannot be empty.")
+        self._add_transaction_page.enter_tags(cleaned_tags)
+
     def select_date_time(self, value: str) -> None:
         """Select an explicit transaction date and time.
 
