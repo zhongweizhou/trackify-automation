@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -16,6 +16,10 @@ CATEGORY_DISPLAY_NAMES = {
     "Food": "Food & Dining",
     "Bills": "Bills & Utilities",
 }
+TRANSACTION_DATE_TIME_FORMATS = (
+    "%Y%m%d %I:%M %p",
+    "%Y-%m-%d %I:%M %p",
+)
 
 
 @dataclass(frozen=True)
@@ -256,6 +260,16 @@ class AddTransactionFlow:
         """
         self._add_transaction_page.enter_note(note)
 
+    def select_date_time(self, value: str) -> None:
+        """Select an explicit transaction date and time.
+
+        Args:
+            value: Date/time such as ``20250506 9:00 AM``.
+        """
+        self._add_transaction_page.select_date_time(
+            self._parse_transaction_date_time(value)
+        )
+
     def create_custom_category(self, name: str) -> None:
         """Create and select a custom expense category.
 
@@ -343,14 +357,15 @@ class AddTransactionFlow:
             expectation.amount,
         )
         time = expectation.selected_at.strftime("%I:%M %p").lstrip("0")
+        date_label = self._format_list_date(expectation.selected_at)
         assert transactions_page.has_transaction(
-            date_label="Today",
+            date_label=date_label,
             category=category,
             amount=amount,
             time=time,
         ), (
             "Transactions did not show one matching row: "
-            f"date='Today', category={category!r}, amount={amount!r}, "
+            f"date={date_label!r}, category={category!r}, amount={amount!r}, "
             f"time={time!r}."
         )
 
@@ -376,7 +391,8 @@ class AddTransactionFlow:
         income = baseline.income
         expense = baseline.expense
 
-        if self._saved_transaction is not None:
+        if self._is_in_current_month(self._saved_transaction):
+            assert self._saved_transaction is not None
             if self._saved_transaction.transaction_type == "income":
                 income += self._saved_transaction.amount
             elif self._saved_transaction.transaction_type == "expense":
@@ -504,6 +520,18 @@ class AddTransactionFlow:
             raise ValueError("Category is required.")
         return cleaned_category
 
+    def _parse_transaction_date_time(self, value: str) -> datetime:
+        cleaned_value = " ".join(value.strip().upper().split())
+        for date_time_format in TRANSACTION_DATE_TIME_FORMATS:
+            try:
+                return datetime.strptime(cleaned_value, date_time_format)
+            except ValueError:
+                continue
+        raise ValueError(
+            f"Unsupported transaction date/time {value!r}. "
+            "Use YYYYMMDD h:mm AM/PM."
+        )
+
     def _new_transaction_id(self, transaction_type: str) -> str:
         return f"{transaction_type}-{uuid4().hex}"
 
@@ -521,3 +549,25 @@ class AddTransactionFlow:
         if transaction_type == "income":
             return f"+${formatted}"
         return f"\u2194 ${formatted}"
+
+    @staticmethod
+    def _format_list_date(selected_at: datetime) -> str:
+        selected_date = selected_at.date()
+        today = date.today()
+        if selected_date == today:
+            return "Today"
+        if selected_date == today - timedelta(days=1):
+            return "Yesterday"
+        return selected_at.strftime("%d %b %Y")
+
+    @staticmethod
+    def _is_in_current_month(
+        transaction: SavedTransactionExpectation | None,
+    ) -> bool:
+        if transaction is None:
+            return False
+        now = datetime.now()
+        return (
+            transaction.selected_at.year == now.year
+            and transaction.selected_at.month == now.month
+        )
