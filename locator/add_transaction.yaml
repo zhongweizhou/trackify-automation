@@ -47,6 +47,62 @@ category_option:
   ios:
     predicate: "label == '{category}'"
 
+category_scroll:
+  description: "Horizontal category list on the Add Transaction form"
+  android:
+    class: "android.widget.HorizontalScrollView"
+  ios:
+    class: "XCUIElementTypeScrollView"
+
+new_category_button:
+  description: "New tile at the far right of the horizontal category list"
+  android:
+    accessibility_id: "New"
+  ios:
+    accessibility_id: "New"
+
+manage_categories_title:
+  description: "Manage Categories page opened from the New tile"
+  android:
+    accessibility_id: "Manage Categories"
+  ios:
+    accessibility_id: "Manage Categories"
+
+add_category_button:
+  description: "Open the New Category form"
+  android:
+    accessibility_id: "Add Category"
+  ios:
+    accessibility_id: "Add Category"
+
+new_category_title:
+  description: "New Category form title"
+  android:
+    accessibility_id: "New Category"
+  ios:
+    accessibility_id: "New Category"
+
+custom_category_name_input:
+  description: "Name field on the New Category form"
+  android:
+    xpath: "//android.widget.EditText[@hint='Category Name']"
+  ios:
+    xpath: "//XCUIElementTypeTextField[@placeholderValue='Category Name']"
+
+create_category_button:
+  description: "Create the custom category with the selected defaults"
+  android:
+    accessibility_id: "Create Category"
+  ios:
+    accessibility_id: "Create Category"
+
+back_from_categories_button:
+  description: "Return from Manage Categories to Add Transaction"
+  android:
+    accessibility_id: "Back"
+  ios:
+    accessibility_id: "Back"
+
 notes_input:
   description: "Second text input on the form; free-text note field"
   android:
@@ -75,9 +131,16 @@ save_button:
   ios:
     accessibility_id: "Save Transaction"
 
+close_button:
+  description: "Close Add Transaction without saving"
+  android:
+    xpath: "//android.view.View[@content-desc='Add Transaction']/following-sibling::android.widget.Button[1]"
+  ios:
+    xpath: "//XCUIElementTypeStaticText[@name='Add Transaction']/following-sibling::XCUIElementTypeButton[1]"
+
 amount_error_message:
   description: "Inline error when amount is empty or invalid"
   android:
-    xpath: "//*[contains(@content-desc, 'Amount') and contains(@content-desc, 'required')]"
+    xpath: "//*[contains(@content-desc, '{message}') or contains(@text, '{message}')]"
   ios:
-    predicate: "label CONTAINS 'Amount' AND label CONTAINS 'required'"
+    predicate: "label CONTAINS '{message}'"

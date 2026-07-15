@@ -54,6 +54,13 @@ recent_transaction_amount:
   ios:
     predicate: "label CONTAINS '{amount}'"
 
+recent_transaction_category:
+  description: "Recent transaction row containing a category name"
+  android:
+    xpath: "//*[contains(@content-desc, '{category}')]"
+  ios:
+    predicate: "label CONTAINS '{category}'"
+
 empty_transactions_message:
   description: "Empty state shown when there are no recent transactions"
   android:

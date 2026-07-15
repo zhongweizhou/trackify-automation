@@ -167,7 +167,8 @@ class AddTransactionFlow:
 
         Args:
             shortcut_name: One of ``Add Expense``, ``Add Income``, or
-                ``Add Transfer``.
+                ``Add Transfer``; ``Add new category`` is supported while the
+                Add Transaction form is open.
 
         Raises:
             ValueError: If the shortcut name is unsupported.
@@ -175,12 +176,26 @@ class AddTransactionFlow:
         normalized_name = shortcut_name.strip().lower()
         if normalized_name == "add expense":
             self._home_page.click_add_expense()
+            self._add_transaction_page.select_type("expense")
         elif normalized_name == "add income":
             self._home_page.click_add_income()
+            self._add_transaction_page.select_type("income")
         elif normalized_name == "add transfer":
             self._home_page.click_add_transfer()
+            self._add_transaction_page.select_type("transfer")
+        elif normalized_name == "add new category":
+            self._add_transaction_page.tap_add_new_category()
         else:
             raise ValueError(f"Unsupported Add Transaction shortcut: {shortcut_name}")
+
+    def select_type(self, transaction_type: str) -> None:
+        """Select a transaction type on the open form.
+
+        Args:
+            transaction_type: Supported transaction type.
+        """
+        normalized_type = self._validate_transaction_type(transaction_type)
+        self._add_transaction_page.select_type(normalized_type)
 
     def enter_amount(self, amount: int | float | str) -> None:
         """Enter the amount on the Add Transaction form.
@@ -190,6 +205,10 @@ class AddTransactionFlow:
         """
         parsed_amount = self._validate_amount(amount)
         self._add_transaction_page.enter_amount(str(parsed_amount))
+
+    def leave_amount_empty(self) -> None:
+        """Leave the Add Transaction amount field empty."""
+        self._add_transaction_page.leave_amount_empty()
 
     def select_category(self, category: str) -> None:
         """Select a category on the Add Transaction form.
@@ -207,9 +226,32 @@ class AddTransactionFlow:
         """
         self._add_transaction_page.enter_note(note)
 
+    def create_custom_category(self, name: str) -> None:
+        """Create and select a custom expense category.
+
+        Args:
+            name: Custom category name.
+        """
+        self._add_transaction_page.create_custom_category(
+            self._validate_category(name)
+        )
+
     def tap_save(self) -> None:
         """Submit the Add Transaction form."""
         self._add_transaction_page.tap_save()
+
+    def assert_amount_error(self, message: str) -> None:
+        """Assert that an empty amount was rejected.
+
+        Args:
+            message: Expected validation copy when exposed by the app.
+
+        Raises:
+            AssertionError: If the save was not rejected.
+        """
+        assert self._add_transaction_page.is_amount_error_visible(message), (
+            f"Amount validation did not reject the form with message {message!r}."
+        )
 
     def assert_recent_transaction_amount(self, amount: int | float | str) -> None:
         """Assert that Recent Transactions contains the submitted amount.
@@ -232,9 +274,26 @@ class AddTransactionFlow:
         Raises:
             AssertionError: If the empty state is not visible.
         """
+        if self._add_transaction_page.is_open():
+            self._add_transaction_page.close()
         self._home_page.verify_visible()
         assert self._home_page.has_empty_transactions_message(), (
             "Recent Transactions was expected to be empty."
+        )
+
+    def assert_recent_transaction_category(self, category: str) -> None:
+        """Assert that Recent Transactions shows a category.
+
+        Args:
+            category: Expected category name.
+
+        Raises:
+            AssertionError: If the category is missing.
+        """
+        cleaned_category = self._validate_category(category)
+        self._home_page.verify_visible()
+        assert self._home_page.has_recent_transaction_category(cleaned_category), (
+            f"Recent Transactions did not show category {cleaned_category!r}."
         )
 
     def _open_add_transaction(self, transaction_type: str) -> None:

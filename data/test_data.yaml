@@ -22,10 +22,10 @@ transactions:
     tags: "transfer"
 
 custom_category:
-  name: "Coffee"
+  name: "baby cost"
   amount: "50"
-  note: "coffee"
-  tags: "coffee"
+  note: "baby cost"
+  tags: "baby,cost"
 
 validation:
   empty_amount_message: "Amount is required"

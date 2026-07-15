@@ -71,6 +71,20 @@ class HomePage(BasePage):
         """
         return self.is_visible(self._loc("recent_transaction_amount", amount=amount))
 
+    def has_recent_transaction_category(self, category: str) -> bool:
+        """Return whether a recent transaction contains a category.
+
+        Args:
+            category: Category name expected in the recent transaction row.
+
+        Returns:
+            True when the category is visible, otherwise False.
+        """
+        return self.is_visible(
+            self._loc("recent_transaction_category", category=category),
+            timeout=3,
+        )
+
     def has_empty_transactions_message(self) -> bool:
         """Return whether the empty Recent Transactions state is visible.
 
