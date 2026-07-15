@@ -1,0 +1,25 @@
+transactions:
+  expense:
+    amount: "100"
+    category: "Food"
+    note: "breakfast"
+    tags: "food,dinna"
+  income:
+    amount: "5000"
+    category: "Salary"
+    note: "fulltime salary"
+    tags: "salary"
+  transfer:
+    amount: "200"
+    category: "Food"
+    note: "transfer amount from main account into sub account"
+    tags: "transfer"
+
+custom_category:
+  name: "Coffee"
+  amount: "50"
+  note: "coffee"
+  tags: "coffee"
+
+validation:
+  empty_amount_message: "Amount is required"
