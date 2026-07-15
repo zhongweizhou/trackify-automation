@@ -12,13 +12,6 @@ home_tab:
   ios:
     accessibility_id: "Home"
 
-onboarding_skip_button:
-  description: "Button to skip the first-run onboarding flow"
-  android:
-    accessibility_id: "Skip"
-  ios:
-    accessibility_id: "Skip"
-
 add_expense_button:
   description: "Home shortcut to open Add Transaction with Expense selected"
   android:
@@ -74,3 +67,17 @@ see_all_transactions_button:
     accessibility_id: "See All"
   ios:
     accessibility_id: "See All"
+
+user_name:
+  description: "Home greeting containing the configured profile name"
+  android:
+    xpath: "//*[contains(@content-desc, '{name}')]"
+  ios:
+    predicate: "label CONTAINS '{name}'"
+
+currency_summary:
+  description: "Home monthly summary containing the configured currency"
+  android:
+    xpath: "//*[contains(@content-desc, '{symbol}0.00')]"
+  ios:
+    predicate: "label CONTAINS '{symbol}0.00'"

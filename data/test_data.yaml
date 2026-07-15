@@ -1,3 +1,9 @@
+app_setup:
+  name: "Kimbal"
+  currency: "$ US Dollar"
+  monthly_budget: "30000"
+  bank_sms_reader_enabled: true
+
 transactions:
   expense:
     amount: "100"

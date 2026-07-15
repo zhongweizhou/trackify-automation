@@ -5,6 +5,7 @@ from __future__ import annotations
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from flow.add_transaction_flow import AddTransactionFlow
+from flow.app_setup_flow import AppSetupFlow
 
 scenarios("../features/add_transaction.feature")
 
@@ -12,6 +13,50 @@ scenarios("../features/add_transaction.feature")
 @given("app is launched with a clean database")
 def app_launched_with_clean_database() -> None:
     """Document the clean app state provided by the autouse reset fixture."""
+
+
+@given(parsers.parse('user enters name "{name}" and continues'))
+def user_enters_name_and_continues(
+    app_setup_flow: AppSetupFlow,
+    name: str,
+) -> None:
+    """Save the first-run profile name and continue.
+
+    Args:
+        app_setup_flow: First-run setup flow fixture.
+        name: Profile name from the Gherkin step.
+    """
+    app_setup_flow.enter_name_and_continue(name)
+
+
+@given(
+    parsers.parse(
+        'user selects currency "{currency}" and sets monthly budget "{monthly_budget}"'
+    )
+)
+def user_configures_currency_and_budget(
+    app_setup_flow: AppSetupFlow,
+    currency: str,
+    monthly_budget: str,
+) -> None:
+    """Configure currency and monthly budget during onboarding.
+
+    Args:
+        app_setup_flow: First-run setup flow fixture.
+        currency: Visible currency label from the Gherkin step.
+        monthly_budget: Monthly budget from the Gherkin step.
+    """
+    app_setup_flow.configure_currency_and_budget(currency, monthly_budget)
+
+
+@given("user enables Bank SMS Reader and gets started")
+def user_enables_bank_sms_reader(app_setup_flow: AppSetupFlow) -> None:
+    """Enable Bank SMS Reader and finish onboarding.
+
+    Args:
+        app_setup_flow: First-run setup flow fixture.
+    """
+    app_setup_flow.enable_bank_sms_reader_and_finish()
 
 
 @given("user is on the Home page")

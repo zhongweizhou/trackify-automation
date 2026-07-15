@@ -27,9 +27,9 @@ type_toggle_transfer:
     accessibility_id: "Transfer"
 
 amount_input:
-  description: "Numeric amount field nested under the rupee currency prefix"
+  description: "Numeric amount field nested under the configured dollar prefix"
   android:
-    xpath: "//android.view.View[@content-desc='₹']/android.widget.EditText"
+    xpath: "//android.view.View[@content-desc='$']/android.widget.EditText"
   ios:
     xpath: "(//XCUIElementTypeTextField)[1]"
 

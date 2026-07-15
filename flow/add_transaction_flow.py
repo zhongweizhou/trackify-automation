@@ -159,8 +159,7 @@ class AddTransactionFlow:
         )
 
     def ensure_home_page(self) -> None:
-        """Skip onboarding if needed and verify the Home page is visible."""
-        self._home_page.skip_onboarding_if_visible()
+        """Verify the preconfigured Home page is visible."""
         self._home_page.verify_visible()
 
     def tap_add_shortcut(self, shortcut_name: str) -> None:

@@ -61,6 +61,7 @@ trackify-automation/
 │   └── __init__.py
 │
 ├── locator/                         # YAML files (one per page)
+│   ├── onboarding.yaml
 │   ├── home.yaml
 │   ├── add_transaction.yaml
 │   └── transactions.yaml
@@ -68,12 +69,14 @@ trackify-automation/
 ├── page/                            # Page Object Pattern
 │   ├── __init__.py
 │   ├── base_page.py                 # Abstract — all pages extend
+│   ├── onboarding_page.py
 │   ├── home_page.py
 │   ├── add_transaction_page.py
 │   └── transactions_page.py
 │
 ├── flow/                            # Business logic (calls Page)
 │   ├── __init__.py
+│   ├── app_setup_flow.py
 │   ├── add_transaction_flow.py
 │   └── transactions_flow.py
 │
@@ -214,7 +217,7 @@ amount_input:
 transaction_type_toggle:
   description: "Tabs to switch between Expense / Income / Transfer"
   android:
-    xpath: "//*[@resource-id='com.trackify.app:id/transaction_type_toggle']"
+    xpath: "//*[@resource-id='com.blixcode.trackify:id/transaction_type_toggle']"
   ios:
     predicate: "type == 'XCUIElementTypeOther' AND name == 'Transaction Type'"
 ```
@@ -451,14 +454,16 @@ import allure
 import pytest
 from appium.webdriver import WebElement
 
+from page.onboarding_page import OnboardingPage
 from page.home_page import HomePage
 from page.add_transaction_page import AddTransactionPage
 from page.transactions_page import TransactionsPage
+from flow.app_setup_flow import AppSetupFlow
 from flow.add_transaction_flow import AddTransactionFlow
 from flow.transactions_flow import TransactionsFlow
 from utils.driver import AppiumDriverFactory
 
-PKG = "com.trackify.app"  # Trackify Android package id
+PKG = "com.blixcode.trackify"  # Trackify Android package id
 
 
 @pytest.fixture(scope="session")
@@ -491,6 +496,10 @@ def home_page(driver) -> HomePage:
     return HomePage(driver)
 
 @pytest.fixture
+def onboarding_page(driver) -> OnboardingPage:
+    return OnboardingPage(driver)
+
+@pytest.fixture
 def add_transaction_page(driver) -> AddTransactionPage:
     return AddTransactionPage(driver)
 
@@ -499,6 +508,10 @@ def transactions_page(driver) -> TransactionsPage:
     return TransactionsPage(driver)
 
 # Flow fixtures — compose pages
+@pytest.fixture
+def app_setup_flow(onboarding_page, home_page) -> AppSetupFlow:
+    return AppSetupFlow(onboarding_page, home_page)
+
 @pytest.fixture
 def add_transaction_flow(home_page, add_transaction_page, transactions_page) -> AddTransactionFlow:
     return AddTransactionFlow(home_page, add_transaction_page, transactions_page)
@@ -510,7 +523,9 @@ def transactions_flow(transactions_page) -> TransactionsFlow:
 
 **Why fixture wiring matters**:
 - Without it, step defs end up calling `HomePage(driver())` themselves → no teardown, leaked sessions.
-- The `reset_app_state` fixture is `autouse=True` so every test starts from a clean Hive — no manual `Before` steps in Gherkin.
+- The `reset_app_state` fixture is `autouse=True` so every test starts from a clean Hive.
+- After reset, every feature `Background` completes the same three ordered first-run stages before business actions begin: save name `Kimbal`; select `$ US Dollar` and monthly budget `30000`; enable Bank SMS Reader and tap `Get Started`.
+- Never use onboarding `Skip` as a test precondition. Skipping leaves profile, currency, budget, and tracking preferences undefined.
 
 ---
 
@@ -645,11 +660,14 @@ Scenario: Add income
 
 **This is a contract**: `step_defs/*_steps.py` MUST implement every phrase below, and every `.feature` file MUST use only these phrases. Adding a new phrase requires adding both the Gherkin usage AND the Python step in the same commit.
 
-#### Given phrases (3 page contexts + 1 Background)
+#### Given phrases (3 page contexts + 4 Background steps)
 
 ```gherkin
 # Used once per .feature file in a Background: block
 Given app is launched with a clean database
+Given user enters name "<name:str>" and continues
+Given user selects currency "<currency:str>" and sets monthly budget "<monthly_budget:int>"
+Given user enables Bank SMS Reader and gets started
 
 Given user is on the Home page
 Given user is on the Add Transaction page
@@ -689,6 +707,8 @@ Then transactions are grouped by date with section headers
 | `<category:str>` | `str` | `"Food"`, `"Transport"` | Free text |
 | `<note:str>` | `str` | `"breakfast with Dinna"` | Free text |
 | `<name:str>` | `str` | `"Coffee"` | Free text |
+| `<currency:str>` | `str` | `"$ US Dollar"` | Full visible option label |
+| `<monthly_budget:int>` | `int` | `30000` | Must be a positive whole number and match the displayed slider value |
 | `<message:str>` | `str` | `"Amount is required"` | Substring match against displayed text |
 
 → **Where these phrases are actually used**: see §6.7 Scenario Inventory v3. Each scenario there is built by combining a subset of these phrases. If §6.7 needs a phrase not listed here, add it here FIRST, then update the scenario in the same commit.
@@ -704,6 +724,9 @@ Feature: Add Transaction
 
   Background:
     Given app is launched with a clean database
+    And user enters name "Kimbal" and continues
+    And user selects currency "$ US Dollar" and sets monthly budget "30000"
+    And user enables Bank SMS Reader and gets started
     And user is on the Home page
 
   @smoke @p0
@@ -758,6 +781,9 @@ Feature: Transactions List
 
   Background:
     Given app is launched with a clean database
+    And user enters name "Kimbal" and continues
+    And user selects currency "$ US Dollar" and sets monthly budget "30000"
+    And user enables Bank SMS Reader and gets started
     And user is on the Home page
 
   @p1 @filter
@@ -806,14 +832,14 @@ curl http://localhost:4723/status | jq .           # expects {"value":{"ready":t
 # 4. Verify the emulator + app package
 adb devices                                        # list attached devices
 adb install -r -t app/app-release.apk              # install Trackify
-adb shell pm list packages | grep com.trackify.app # confirm pkg present
+adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 ```
 
 **If any of these fail, fix before Task 1.** The Day 0 failures (server not running, package missing) are the #1 cause of "pytest hangs forever" symptoms later — not real bugs.
 
 | # | Task | Files touched | Acceptance criteria | Commit message |
 |---|------|---------------|---------------------|----------------|
-| 1 | Project bootstrap | `pyproject.toml`, `pytest.ini`, `conftest.py`, `.gitignore` | `pytest --collect-only` exits 0; `conftest.py` includes the `reset_app_state` autouse fixture from §5.1 (calls `adb shell pm clear com.trackify.app` before every test) | `chore: bootstrap project` |
+| 1 | Project bootstrap | `pyproject.toml`, `pytest.ini`, `conftest.py`, `.gitignore` | `pytest --collect-only` exits 0; `conftest.py` includes the `reset_app_state` autouse fixture from §5.1 (calls `adb shell pm clear com.blixcode.trackify` before every test) | `chore: bootstrap project` |
 | 2 | Base page | `page/base_page.py` | Importing `BasePage` works | `feat(page): base page with click/wait/screenshot` |
 | 3 | Driver factory | `utils/driver.py`, `utils/config.py` | `AppiumDriverFactory(platform="android").create()` returns a live Appium session; class name avoids collision with `selenium.webdriver.Driver`; consumed by `driver` fixture in §5.1 | `feat(utils): appium driver factory` |
 | 4 | Locator loader | `utils/locator_loader.py`, `locator/home.yaml` (skeleton) | `load_locator("home", "x", "android")` returns string | `feat(utils): yaml locator loader + skeleton` |
@@ -821,6 +847,7 @@ adb shell pm list packages | grep com.trackify.app # confirm pkg present
 | 6 | Add Transaction page + Locator | `page/add_transaction_page.py`, `locator/add_transaction.yaml` | `add_tx.add_expense(amount=100, category="Food")` works | `feat(page): add transaction page (all 3 types)` |
 | 7 | Add Transaction flow | `flow/add_transaction_flow.py`, `data/test_data.yaml` | `flow.add_expense(...)` orchestrates Page + returns new ID | `feat(flow): add transaction business logic` |
 | 8 | First BDD feature (Add Expense happy path) | `tests/features/add_transaction.feature`, `tests/step_defs/add_transaction_steps.py`, `conftest.py` (page/flow fixtures) | `pytest tests/features/add_transaction.feature -k "happy_path"` collects and runs **only** the "Add expense happy path" scenario from §6.7. Other 4 Add Transaction scenarios written but tagged `@skip` (or feature-level Background-only). Implements every §6.6 phrase used in this scenario. | `test(case): add transaction bdd (expense happy path)` |
+| 8a | First-run setup baseline | `locator/onboarding.yaml`, `page/onboarding_page.py`, `flow/app_setup_flow.py`, `conftest.py`, BDD `Background` blocks | Every business scenario completes `Kimbal` → `$ US Dollar` + `30000` → Bank SMS Reader enabled + `Get Started`; no test path taps onboarding `Skip`; Home shows `Kimbal` and `$` before business actions | `feat(setup): complete required first-run configuration` |
 | 8b | Remaining Add Transaction scenarios | `tests/features/add_transaction.feature`, `tests/step_defs/add_transaction_steps.py` | Un-skip the remaining **4 scenarios** from §6.7 (Add Income, Add Transfer, Validation, Custom Category). Implement the additional §6.6 phrases (`user selects type`, `user taps "Add new category"`, `user creates custom category`, `error message ... is shown for amount`, `no transaction appears ...`). All **5 Add Transaction scenarios** pass. | `test(case): add transaction bdd (4 more scenarios + custom category)` |
 | 9 | Transactions page + flow | `page/transactions_page.py`, `flow/transactions_flow.py`, `locator/transactions.yaml` | Manual test: filter + group-by-date works | `feat(page): transactions page + flow` |
 | 10 | Transactions BDD | `tests/features/transactions.feature`, `tests/step_defs/transactions_steps.py` | Both Transactions scenarios from §6.7 collect and run: filter by type (`@filter`), group-by-date (`@grouping`). Implement the additional §6.6 phrases (`user filters transactions by type`, `only transactions of type ... are shown`, `transactions are grouped by date ...`). **Total project: 5 Add Transaction + 2 Transactions = 7 scenarios**. | `test(case): transactions bdd (2 scenarios)` |

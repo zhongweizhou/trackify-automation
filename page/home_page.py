@@ -32,11 +32,6 @@ class HomePage(BasePage):
         self.wait_for(self._loc("home_tab"))
         self.wait_for(self._loc("recent_transactions_title"))
 
-    def skip_onboarding_if_visible(self) -> None:
-        """Skip first-run onboarding when it is present."""
-        if self.is_visible(self._loc("onboarding_skip_button"), timeout=5):
-            self.click(self._loc("onboarding_skip_button"))
-
     def click_add_expense(self) -> None:
         """Open Add Transaction with Expense selected."""
         self.click(self._loc("add_expense_button"))
@@ -83,6 +78,30 @@ class HomePage(BasePage):
             True when the empty state is visible, otherwise False.
         """
         return self.is_visible(self._loc("empty_transactions_message"), timeout=3)
+
+    def has_user_name(self, name: str) -> bool:
+        """Return whether Home shows the configured user name.
+
+        Args:
+            name: Expected profile name.
+
+        Returns:
+            True when the greeting contains the name, otherwise False.
+        """
+        return self.is_visible(self._loc("user_name", name=name), timeout=3)
+
+    def uses_currency_symbol(self, symbol: str) -> bool:
+        """Return whether the Home summary uses the configured currency.
+
+        Args:
+            symbol: Expected currency symbol.
+
+        Returns:
+            True when the monthly summary contains the symbol, otherwise False.
+        """
+        return self.is_visible(
+            self._loc("currency_summary", symbol=symbol), timeout=3
+        )
 
     def _loc(self, key: str, **format_values: str) -> Locator:
         strategy, value = load_locator("home", key, self._platform)

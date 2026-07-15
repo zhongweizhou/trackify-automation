@@ -11,8 +11,10 @@ from typing import Any
 import pytest
 
 from flow.add_transaction_flow import AddTransactionFlow
+from flow.app_setup_flow import AppSetupFlow
 from page.add_transaction_page import AddTransactionPage
 from page.home_page import HomePage
+from page.onboarding_page import OnboardingPage
 
 PKG = os.getenv("ANDROID_PACKAGE", "com.blixcode.trackify")
 
@@ -114,6 +116,19 @@ def home_page(driver: Any) -> HomePage:
 
 
 @pytest.fixture
+def onboarding_page(driver: Any) -> OnboardingPage:
+    """Create an onboarding page object for the current test.
+
+    Args:
+        driver: The active Appium driver fixture.
+
+    Returns:
+        Onboarding page object bound to the active driver.
+    """
+    return OnboardingPage(driver)
+
+
+@pytest.fixture
 def add_transaction_page(driver: Any) -> AddTransactionPage:
     """Create an Add Transaction page object for the current test.
 
@@ -124,6 +139,23 @@ def add_transaction_page(driver: Any) -> AddTransactionPage:
         Add Transaction page object bound to the active driver.
     """
     return AddTransactionPage(driver)
+
+
+@pytest.fixture
+def app_setup_flow(
+    onboarding_page: OnboardingPage,
+    home_page: HomePage,
+) -> AppSetupFlow:
+    """Create the ordered first-run setup flow for the current test.
+
+    Args:
+        onboarding_page: Onboarding page fixture.
+        home_page: Home page fixture.
+
+    Returns:
+        Flow object for the three required setup stages.
+    """
+    return AppSetupFlow(onboarding_page, home_page)
 
 
 @pytest.fixture
