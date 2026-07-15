@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+import warnings
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
+import allure
 import pytest
 
 from flow.add_transaction_flow import AddTransactionFlow
@@ -20,6 +23,9 @@ from page.transactions_page import TransactionsPage
 
 PKG = os.getenv("ANDROID_PACKAGE", "com.blixcode.trackify")
 pytest_plugins = ("tests.step_defs.common_steps",)
+PROJECT_ROOT = Path(__file__).resolve().parent
+SCREENSHOT_DIR = PROJECT_ROOT / "report" / "screenshots"
+_SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 class FeatureFile(pytest.File):
@@ -68,6 +74,63 @@ def pytest_collect_file(
         return None
 
     return FeatureFile.from_parent(parent, path=file_path)
+
+
+def pytest_bdd_before_scenario(
+    request: pytest.FixtureRequest,
+    feature: Any,
+    scenario: Any,
+) -> None:
+    """Expose readable BDD feature and scenario names in Allure results."""
+    allure.dynamic.title(scenario.name)
+    allure.dynamic.feature(feature.name)
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item,
+    call: pytest.CallInfo[Any],
+) -> Generator[None, Any, None]:
+    """Attach a screenshot to Allure for call-stage failures."""
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "call" and report.failed and call.excinfo is not None:
+        _capture_failure_screenshot(item)
+
+
+def _capture_failure_screenshot(item: pytest.Item) -> Path | None:
+    driver = item.funcargs.get("driver")
+    if driver is None:
+        warnings.warn(
+            pytest.PytestWarning(
+                f"Cannot capture {item.name!r}: driver fixture is unavailable."
+            ),
+            stacklevel=1,
+        )
+        return None
+
+    safe_test_name = _SAFE_FILENAME_PATTERN.sub("_", item.name).strip("._")
+    screenshot_path = SCREENSHOT_DIR / f"{safe_test_name}.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        saved = driver.save_screenshot(str(screenshot_path))
+        if saved is False:
+            raise RuntimeError("Appium returned false while saving the screenshot.")
+        allure.attach.file(
+            str(screenshot_path),
+            name=f"Failure screenshot - {item.name}",
+            attachment_type=allure.attachment_type.PNG,
+        )
+    except Exception as exc:
+        warnings.warn(
+            pytest.PytestWarning(
+                f"Could not capture failure screenshot for {item.name!r}: {exc}"
+            ),
+            stacklevel=1,
+        )
+        return None
+    return screenshot_path
 
 
 @pytest.fixture(scope="session")
