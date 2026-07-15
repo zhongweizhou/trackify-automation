@@ -22,7 +22,12 @@ class AppiumConfig:
         platform: Target mobile platform, either ``android`` or ``ios``.
         appium_server_url: Appium server endpoint.
         device_name: Emulator, simulator, or real device name.
+        device_udid: Optional unique device identifier used for exact routing.
         app_path: Local path to the app bundle or APK under test.
+        system_port: Per-device UiAutomator2 server port.
+        wda_local_port: Per-device WebDriverAgent host port.
+        mjpeg_server_port: Per-device WebDriverAgent MJPEG stream port.
+        derived_data_path: Per-device WebDriverAgent Xcode build directory.
         android_package: Optional Android application package name override.
         android_activity: Optional Android launch activity override.
     """
@@ -30,7 +35,12 @@ class AppiumConfig:
     platform: str
     appium_server_url: str
     device_name: str
+    device_udid: str | None
     app_path: Path
+    system_port: int | None = None
+    wda_local_port: int | None = None
+    mjpeg_server_port: int | None = None
+    derived_data_path: Path | None = None
     android_package: str | None = None
     android_activity: str | None = None
 
@@ -76,7 +86,25 @@ def load_config(
             or ini_values.get("device_name")
             or _default_device_name(resolved_platform)
         ),
+        device_udid=os.getenv("DEVICE_UDID") or ini_values.get("device_udid"),
         app_path=app_path,
+        system_port=_optional_int(
+            os.getenv("SYSTEM_PORT") or ini_values.get("system_port"),
+            "SYSTEM_PORT",
+        ),
+        wda_local_port=_optional_int(
+            os.getenv("WDA_LOCAL_PORT") or ini_values.get("wda_local_port"),
+            "WDA_LOCAL_PORT",
+        ),
+        mjpeg_server_port=_optional_int(
+            os.getenv("MJPEG_SERVER_PORT")
+            or ini_values.get("mjpeg_server_port"),
+            "MJPEG_SERVER_PORT",
+        ),
+        derived_data_path=_optional_path(
+            os.getenv("WDA_DERIVED_DATA_PATH")
+            or ini_values.get("wda_derived_data_path")
+        ),
         android_package=os.getenv("ANDROID_PACKAGE")
         or ini_values.get("android_package"),
         android_activity=os.getenv("ANDROID_ACTIVITY")
@@ -115,3 +143,19 @@ def _default_device_name(platform: str) -> str:
     if platform == "ios":
         return DEFAULT_IOS_DEVICE_NAME
     return DEFAULT_ANDROID_DEVICE_NAME
+
+
+def _optional_int(value: str | None, name: str) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}.") from exc
+    if not 1 <= parsed <= 65535:
+        raise ValueError(f"{name} must be between 1 and 65535, got {parsed}.")
+    return parsed
+
+
+def _optional_path(value: str | None) -> Path | None:
+    return Path(value).expanduser().resolve() if value else None

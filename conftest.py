@@ -25,7 +25,9 @@ PKG = os.getenv("ANDROID_PACKAGE", "com.blixcode.trackify")
 IOS_BUNDLE_ID = os.getenv("IOS_BUNDLE_ID", "com.blixcode.trackify")
 pytest_plugins = ("tests.step_defs.common_steps",)
 PROJECT_ROOT = Path(__file__).resolve().parent
-SCREENSHOT_DIR = PROJECT_ROOT / "report" / "screenshots"
+SCREENSHOT_DIR = Path(
+    os.getenv("SCREENSHOT_DIR", PROJECT_ROOT / "report" / "screenshots")
+).expanduser()
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -87,6 +89,20 @@ def pytest_bdd_before_scenario(
     allure.dynamic.feature(feature.name)
 
 
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Add matrix identity before fixtures so setup failures remain attributable."""
+    del item
+    context = _execution_context()
+    allure.dynamic.parent_suite(context["environment"])
+    allure.dynamic.suite(f"{context['platform']} - {context['device_name']}")
+    allure.dynamic.label("host", context["device_udid"])
+    allure.dynamic.parameter("Environment", context["environment"])
+    allure.dynamic.parameter("Platform", context["platform"])
+    allure.dynamic.parameter("Device", context["device_name"])
+    allure.dynamic.parameter("OS Version", context["os_version"])
+    allure.dynamic.parameter("UDID", context["device_udid"])
+
+
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(
     item: pytest.Item,
@@ -135,7 +151,7 @@ def _capture_failure_screenshot(item: pytest.Item) -> Path | None:
 
 
 @pytest.fixture(scope="session")
-def driver() -> Generator[Any, None, None]:
+def driver(pytestconfig: pytest.Config) -> Generator[Any, None, None]:
     """Create one Appium driver session for the pytest run.
 
     Yields:
@@ -145,6 +161,7 @@ def driver() -> Generator[Any, None, None]:
 
     platform = os.getenv("PLATFORM", "android")
     appium_driver = AppiumDriverFactory(platform=platform).create()
+    _write_allure_environment(pytestconfig, appium_driver)
     try:
         yield appium_driver
     finally:
@@ -165,10 +182,21 @@ def reset_app_state(driver: Any) -> Generator[None, None, None]:
     app_id = IOS_BUNDLE_ID if platform == "ios" else PKG
 
     if platform == "ios":
-        driver.execute_script("mobile: clearApp", {"bundleId": app_id})
+        if os.getenv("IOS_REAL_DEVICE", "false").lower() == "true":
+            driver.execute_script("mobile: removeApp", {"bundleId": app_id})
+            driver.execute_script(
+                "mobile: installApp", {"app": str(Path(os.environ["APP_PATH"]).resolve())}
+            )
+        else:
+            driver.execute_script("mobile: clearApp", {"bundleId": app_id})
     else:
+        adb_command = [_adb()]
+        if device_udid := os.getenv("DEVICE_UDID"):
+            adb_command.extend(["-s", device_udid])
         subprocess.run(
-            [_adb(), "shell", "pm", "clear", app_id], check=True, timeout=10
+            [*adb_command, "shell", "pm", "clear", app_id],
+            check=True,
+            timeout=10,
         )
 
     if hasattr(driver, "activate_app"):
@@ -292,6 +320,60 @@ def _adb() -> str:
         if candidate.exists():
             return str(candidate)
     return "adb"
+
+
+def _execution_context(driver: Any | None = None) -> dict[str, str]:
+    capabilities = getattr(driver, "capabilities", {}) if driver is not None else {}
+    platform = str(capabilities.get("platformName") or os.getenv("PLATFORM", "unknown"))
+    device_name = str(
+        os.getenv("DEVICE_NAME")
+        or capabilities.get("deviceName")
+        or capabilities.get("appium:deviceName")
+        or "unknown"
+    )
+    device_udid = str(
+        os.getenv("DEVICE_UDID")
+        or capabilities.get("udid")
+        or capabilities.get("appium:udid")
+        or "unknown"
+    )
+    os_version = str(
+        os.getenv("OS_VERSION")
+        or capabilities.get("platformVersion")
+        or capabilities.get("appium:platformVersion")
+        or "unknown"
+    )
+    return {
+        "environment": os.getenv("TEST_ENV", "preprod"),
+        "platform": platform,
+        "device_name": device_name,
+        "device_udid": device_udid,
+        "os_version": os_version,
+    }
+
+
+def _write_allure_environment(pytestconfig: pytest.Config, driver: Any) -> None:
+    report_dir = os.getenv("ALLURE_RESULTS_DIR") or getattr(
+        pytestconfig.option, "allure_report_dir", None
+    )
+    if not report_dir:
+        return
+    output_dir = Path(report_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    context = _execution_context(driver)
+    properties = "\n".join(
+        f"{key}={value}"
+        for key, value in (
+            ("Test.Environment", context["environment"]),
+            ("Device.Platform", context["platform"]),
+            ("Device.Name", context["device_name"]),
+            ("Device.UDID", context["device_udid"]),
+            ("Device.OS.Version", context["os_version"]),
+        )
+    )
+    (output_dir / "environment.properties").write_text(
+        f"{properties}\n", encoding="utf-8"
+    )
 
 
 def pytest_sessionfinish(

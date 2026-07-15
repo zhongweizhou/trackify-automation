@@ -190,6 +190,76 @@ APPIUM_SERVER_URL="http://127.0.0.1:4723" \
 uv run pytest
 ```
 
+#### Run on every connected device
+
+The device-matrix runner discovers every ready Android target from `adb` and
+every booted iOS simulator from `simctl`. It starts one isolated pytest process
+per device and runs them concurrently. The test environment defaults to
+`preprod`.
+
+```bash
+# Preview the discovered matrix without running tests
+.venv/bin/python scripts/run_device_matrix.py --list
+
+# Run all seven scenarios on every discovered Android and iOS device
+.venv/bin/python scripts/run_device_matrix.py --env preprod
+
+# Run only smoke scenarios on the full matrix
+.venv/bin/python scripts/run_device_matrix.py --env preprod -- -m smoke
+
+# Run one device by UDID
+.venv/bin/python scripts/run_device_matrix.py \
+  --env preprod \
+  --device emulator-5554
+
+# Include connected physical iOS devices using a signed device build
+.venv/bin/python scripts/run_device_matrix.py \
+  --env preprod \
+  --ios-real-app "$PWD/app/Trackify-preprod.ipa"
+```
+
+Before running, start Appium once and leave it running:
+
+```bash
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+appium
+```
+
+The Android SDK variables must be present in the terminal that starts Appium;
+setting them only in the pytest terminal does not update an existing Appium
+process.
+
+Each device receives a unique Appium backend port and isolated artifact
+directories. Results are written under:
+
+```text
+report/device-matrix/<environment>/<timestamp>/
+├── summary.md                    # Human-readable status by device
+├── summary.json                  # Machine-readable matrix result
+├── allure-results/               # Combined raw Allure results
+├── allure-report/index.html      # Combined static report
+├── android-<device>-<udid>/
+│   ├── pytest.log
+│   ├── junit.xml
+│   ├── allure-results/
+│   └── screenshots/
+└── ios-<device>-<udid>/
+    ├── pytest.log
+    ├── junit.xml
+    ├── allure-results/
+    └── screenshots/
+```
+
+Every Allure test result includes the environment, platform, device name,
+operating-system version, and UDID. The matrix summary reports passed, failed,
+error, and skipped counts separately for each device.
+
+Physical iOS devices must be paired, unlocked, in Developer Mode, and visible
+to `xcrun devicectl list devices`. Because `mobile: clearApp` is simulator-only,
+the runner resets a physical iOS target by uninstalling and reinstalling the
+signed app before each scenario.
+
 ---
 
 ## Test Coverage
