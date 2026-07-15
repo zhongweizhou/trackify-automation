@@ -4,3 +4,52 @@ x:
     accessibility_id: "Home"
   ios:
     accessibility_id: "Home"
+
+home_tab:
+  description: "Bottom navigation item showing the active Home page"
+  android:
+    accessibility_id: "Home"
+  ios:
+    accessibility_id: "Home"
+
+add_expense_button:
+  description: "Home shortcut to open Add Transaction with Expense selected"
+  android:
+    accessibility_id: "Expense"
+  ios:
+    accessibility_id: "Expense"
+
+add_income_button:
+  description: "Home shortcut to open Add Transaction with Income selected"
+  android:
+    accessibility_id: "Income"
+  ios:
+    accessibility_id: "Income"
+
+add_transfer_button:
+  description: "Home shortcut to open Add Transaction with Transfer selected"
+  android:
+    accessibility_id: "Transfer"
+  ios:
+    accessibility_id: "Transfer"
+
+add_transaction_button:
+  description: "Floating button on Home page to open Add Transaction"
+  android:
+    accessibility_id: "Add Transaction"
+  ios:
+    accessibility_id: "Add Transaction"
+
+recent_transactions_title:
+  description: "Recent Transactions section header on the Home page"
+  android:
+    accessibility_id: "Recent Transactions"
+  ios:
+    accessibility_id: "Recent Transactions"
+
+see_all_transactions_button:
+  description: "Link from Home recent transactions to the Transactions page"
+  android:
+    accessibility_id: "See All"
+  ios:
+    accessibility_id: "See All"
