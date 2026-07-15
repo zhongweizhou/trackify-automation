@@ -87,7 +87,7 @@ custom_category_name_input:
   android:
     xpath: "//android.widget.EditText[@hint='Category Name']"
   ios:
-    xpath: "//XCUIElementTypeTextField[@placeholderValue='Category Name']"
+    accessibility_id: "Category Name"
 
 create_category_button:
   description: "Create the custom category with the selected defaults"
@@ -185,14 +185,14 @@ time_hour_input:
   android:
     xpath: "//android.widget.EditText[@hint='Hour']"
   ios:
-    xpath: "//XCUIElementTypeTextField[@placeholderValue='Hour']"
+    accessibility_id: "Hour"
 
 time_minute_input:
   description: "Minute field in the text time picker"
   android:
     xpath: "//android.widget.EditText[@hint='Minute']"
   ios:
-    xpath: "//XCUIElementTypeTextField[@placeholderValue='Minute']"
+    accessibility_id: "Minute"
 
 time_meridiem_option:
   description: "AM or PM option in the time picker"

@@ -114,7 +114,7 @@ class AddTransactionPage(BasePage):
     def leave_amount_empty(self) -> None:
         """Ensure the amount field has no entered value."""
         amount_input = self.wait_for(self._loc("amount_input"))
-        if amount_input.get_attribute("text"):
+        if amount_input.get_attribute(self._text_attribute):
             amount_input.clear()
         self._amount_left_empty = True
 
@@ -150,19 +150,23 @@ class AddTransactionPage(BasePage):
         name_input = self.wait_for(self._loc("custom_category_name_input"))
         name_input.clear()
         name_input.send_keys(name)
+        self._keyboard_needs_blur = True
         self._complete_keyboard_input()
         entered_name = self.wait_for(
             self._loc("custom_category_name_input")
-        ).get_attribute("text")
+        ).get_attribute(self._text_attribute)
         if entered_name != name:
             raise AssertionError(
                 f"Custom category input contains {entered_name!r}, expected {name!r}."
             )
-        self._tap_locator(self._loc("new_category_title"))
-        self._keyboard_needs_blur = False
+        self._blur_keyboard_if_needed()
         self._tap_locator(self._loc("create_category_button"))
         self.wait_for(self._loc("manage_categories_title"))
         self._tap_locator(self._loc("back_from_categories_button"))
+        if self._platform == "ios":
+            self._tap_locator(self._loc("tags_input"))
+            self._keyboard_needs_blur = True
+            self._blur_keyboard_if_needed()
         self.verify_visible()
         self._select_custom_category(name)
 
@@ -183,7 +187,9 @@ class AddTransactionPage(BasePage):
         """
         self._input_text(self._loc("tags_input"), tags)
         self._complete_keyboard_input()
-        entered_tags = self.wait_for(self._loc("tags_input")).get_attribute("text")
+        entered_tags = self.wait_for(self._loc("tags_input")).get_attribute(
+            self._text_attribute
+        )
         if entered_tags != tags:
             raise AssertionError(
                 f"Tags input contains {entered_tags!r}, expected {tags!r}."
@@ -192,7 +198,7 @@ class AddTransactionPage(BasePage):
     def selected_date_time(self) -> str:
         """Return the date and time currently selected on the form."""
         value = self.wait_for(self._loc("date_picker_trigger")).get_attribute(
-            "content-desc"
+            self._description_attribute
         )
         if not value:
             raise AssertionError("Add Transaction date/time is empty.")
@@ -256,7 +262,9 @@ class AddTransactionPage(BasePage):
             return False
         if not self.is_open():
             return False
-        amount_text = self.wait_for(self._loc("amount_input")).get_attribute("text")
+        amount_text = self.wait_for(self._loc("amount_input")).get_attribute(
+            self._text_attribute
+        )
         return not amount_text
 
     def is_open(self) -> bool:
@@ -296,13 +304,11 @@ class AddTransactionPage(BasePage):
         element = self.wait_for(locator)
         center_x = element.location["x"] + element.size["width"] // 2
         center_y = element.location["y"] + element.size["height"] // 2
+        command = "mobile: tap" if self._platform == "ios" else "mobile: clickGesture"
         try:
-            self._driver.execute_script(
-                "mobile: clickGesture",
-                {"x": center_x, "y": center_y},
-            )
+            self._driver.execute_script(command, {"x": center_x, "y": center_y})
         except WebDriverException:
-            self._driver.tap([(center_x, center_y)], 100)
+            element.click()
 
     def _input_text(self, locator: Locator, text: str) -> None:
         self._tap_locator(locator)
@@ -315,6 +321,17 @@ class AddTransactionPage(BasePage):
         for _ in range(4):
             if self.is_visible(locator, timeout=1):
                 return
+
+            if self._platform == "ios":
+                window = self._driver.get_window_size()
+                self.swipe(
+                    window["width"] * 9 // 10,
+                    window["height"] * 36 // 100,
+                    window["width"] // 10,
+                    window["height"] * 36 // 100,
+                    duration_ms=600,
+                )
+                continue
 
             category_scroll = self.wait_for(self._loc("category_scroll"))
             start_x = (
@@ -384,15 +401,20 @@ class AddTransactionPage(BasePage):
 
     def _select_clock_time(self, target: datetime) -> None:
         self._tap_locator(self._loc("time_text_mode_button"))
-        hour = target.strftime("%I").lstrip("0")
+        hour = (
+            target.strftime("%H")
+            if self._platform == "ios"
+            else target.strftime("%I").lstrip("0")
+        )
         self._replace_time_value(self._loc("time_hour_input"), hour)
         self._replace_time_value(
             self._loc("time_minute_input"),
             target.strftime("%M"),
         )
-        self._tap_locator(
-            self._loc("time_meridiem_option", meridiem=target.strftime("%p"))
-        )
+        if self._platform != "ios":
+            self._tap_locator(
+                self._loc("time_meridiem_option", meridiem=target.strftime("%p"))
+            )
         self._tap_locator(self._loc("dialog_ok_button"))
 
     def _replace_time_value(self, locator: Locator, value: str) -> None:
@@ -423,6 +445,14 @@ class AddTransactionPage(BasePage):
         )
         self._keyboard_needs_blur = False
 
+    @property
+    def _text_attribute(self) -> str:
+        return "value" if self._platform == "ios" else "text"
+
+    @property
+    def _description_attribute(self) -> str:
+        return "label" if self._platform == "ios" else "content-desc"
+
     @staticmethod
     def _month_year(month: int, year: int) -> str:
         return f"{month_name[month]} {year}"
@@ -430,5 +460,17 @@ class AddTransactionPage(BasePage):
     def _blur_keyboard_if_needed(self) -> None:
         if not self._keyboard_needs_blur:
             return
-        self._tap_locator(self._loc("page_title"))
+        if self._platform == "ios":
+            try:
+                self._driver.hide_keyboard()
+            except WebDriverException:
+                pass
+            title_key = (
+                "page_title"
+                if self.is_visible(self._loc("page_title"), timeout=1)
+                else "new_category_title"
+            )
+            self._tap_locator(self._loc(title_key))
+        else:
+            self._tap_locator(self._loc("page_title"))
         self._keyboard_needs_blur = False

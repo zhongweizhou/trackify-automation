@@ -31,7 +31,7 @@ currency_selector:
   android:
     xpath: "//android.view.View[contains(@content-desc, 'Monthly Budget')]/android.widget.Button"
   ios:
-    xpath: "//XCUIElementTypeOther[contains(@label, 'Monthly Budget')]/XCUIElementTypeButton"
+    accessibility_id: "₹ Indian Rupee"
 
 currency_option:
   description: "Currency option selected by its visible label"
@@ -45,7 +45,7 @@ budget_slider:
   android:
     class: "android.widget.SeekBar"
   ios:
-    class: "XCUIElementTypeSlider"
+    xpath: "//XCUIElementTypeOther[contains(@value, '%')]"
 
 tracking_page:
   description: "Final onboarding page containing tracking preferences"

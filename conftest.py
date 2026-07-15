@@ -22,6 +22,7 @@ from page.onboarding_page import OnboardingPage
 from page.transactions_page import TransactionsPage
 
 PKG = os.getenv("ANDROID_PACKAGE", "com.blixcode.trackify")
+IOS_BUNDLE_ID = os.getenv("IOS_BUNDLE_ID", "com.blixcode.trackify")
 pytest_plugins = ("tests.step_defs.common_steps",)
 PROJECT_ROOT = Path(__file__).resolve().parent
 SCREENSHOT_DIR = PROJECT_ROOT / "report" / "screenshots"
@@ -160,9 +161,18 @@ def reset_app_state(driver: Any) -> Generator[None, None, None]:
     Yields:
         None after relaunching the app under test.
     """
-    subprocess.run([_adb(), "shell", "pm", "clear", PKG], check=True, timeout=10)
+    platform = str(driver.capabilities.get("platformName", "")).lower()
+    app_id = IOS_BUNDLE_ID if platform == "ios" else PKG
+
+    if platform == "ios":
+        driver.execute_script("mobile: clearApp", {"bundleId": app_id})
+    else:
+        subprocess.run(
+            [_adb(), "shell", "pm", "clear", app_id], check=True, timeout=10
+        )
+
     if hasattr(driver, "activate_app"):
-        driver.activate_app(PKG)
+        driver.activate_app(app_id)
     else:
         driver.launch_app()
     yield

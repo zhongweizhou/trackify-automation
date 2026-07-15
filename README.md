@@ -362,8 +362,9 @@ Command: `uv run pytest --alluredir=./allure-results`
 
 ## iOS Extension Plan
 
-> The current suite is device-validated on Android. The existing platform
-> boundary allows an iOS extension without changing Gherkin or Flow behavior.
+> The full suite is device-validated on Android and on an iPhone 17 simulator
+> running iOS 26.5. Other iOS device sizes and locale settings may require
+> additional locator or picker calibration.
 
 ### Step-by-step
 
@@ -383,7 +384,7 @@ Command: `uv run pytest --alluredir=./allure-results`
    xcrun simctl boot "iPhone 16"
    open -a Simulator
    ```
-4. **Validate the iOS entries in each existing locator YAML**
+4. **Review the iOS entries when the app UI or simulator profile changes**
    ```yaml
    amount_input:
      android:
@@ -409,8 +410,9 @@ Command: `uv run pytest --alluredir=./allure-results`
 | Date/time picker | Android calendar/clock | iOS wheel or compact picker |
 | Permission dialog | Android runtime permission | iOS system alert |
 
-The iOS entries are placeholders until they are verified against a live
-simulator.
+The current iOS entries were verified against the bundled `Runner.app` on an
+iPhone 17 simulator running iOS 26.5. Run the full suite when changing the app,
+simulator profile, locale, or 12/24-hour time setting.
 
 ---
 

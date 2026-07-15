@@ -17,7 +17,7 @@ monthly_summary:
   android:
     class: "android.widget.ProgressBar"
   ios:
-    class: "XCUIElementTypeProgressIndicator"
+    predicate: "label CONTAINS 'This Month' AND label CONTAINS 'Income' AND label CONTAINS 'Expense'"
 
 add_expense_button:
   description: "Home shortcut to open Add Transaction with Expense selected"
@@ -74,6 +74,13 @@ empty_transactions_message:
     accessibility_id: "No transactions yet"
   ios:
     accessibility_id: "No transactions yet"
+
+recent_transaction_rows:
+  description: "Recent transaction rows containing an amount and 12-hour time"
+  android:
+    xpath: "//*[contains(@content-desc, '$') and (contains(@content-desc, ' AM') or contains(@content-desc, ' PM'))]"
+  ios:
+    predicate: "label CONTAINS '$' AND (label CONTAINS ' AM' OR label CONTAINS ' PM')"
 
 see_all_transactions_button:
   description: "Link from Home recent transactions to the Transactions page"

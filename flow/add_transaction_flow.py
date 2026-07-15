@@ -425,7 +425,7 @@ class AddTransactionFlow:
             ),
         )
         self._return_to_home()
-        actual = self._home_page.monthly_summary()
+        actual = self._home_page.wait_for_monthly_summary(expected)
         assert actual == expected, (
             "This Month summary mismatch. "
             f"Expected {expected}, displayed {actual}; percentage formula is "
