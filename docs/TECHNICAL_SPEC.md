@@ -98,7 +98,7 @@ trackify-automation/
 │   └── .backup/                     # Auto-created by sync_engine.py before each write
 │
 ├── scripts/
-│   └── sync_engine.py               # Excel ↔ .feature diff/apply (Task 14 PoC)
+│   └── sync_engine.py               # Excel → .feature check/apply (Task 14 PoC)
 │
 ├── report/
 │   ├── allure-results/              # Generated each run
@@ -922,39 +922,84 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 | 12 | CI + Reflection | `.github/workflows/ci.yml`, `docs/REFLECTION.md` | README links work; all commits squashed cleanly | `docs: reflection + ci + final polish` |
 
 **Optional Day 4 task** (if time permits):
-- **Task 13**: AI Triage — when a pytest test fails, classify the failure into one of {**Locator**, **App Bug**, **Env**, **Script**, **Data**}, attach the verdict to the Allure report, and print a one-line console summary so the engineer knows where to look first. **Architecture (2-stage)**:
-  1. **Local heuristic** — regex match `error_msg + traceback` against `LOCAL_SIGNATURES` (see table below). If a category scores ≥ 0.7 confidence, return immediately. No network, <1 ms.
-  2. **LLM fallback** — if local confidence is low or no signature matched, call Claude API with `{test_name, error_msg, traceback, screenshot_path}`. Returns `{category, confidence, reasoning, next_action}`.
+- **Task 13**: AI Triage — classify the first failing pytest phase for each test as one of {**Locator**, **App Bug**, **Env**, **Script**, **Data**, **Unknown**}. The verdict is advisory: it MUST NOT mutate the pytest outcome, suppress the original traceback, or be presented as a confirmed root cause.
 
-  **Signature map** (regexes Codex MUST include in `ai/triage.py:LOCAL_SIGNATURES`):
+  **Result contract** (`TriageResult`, frozen dataclass):
 
-  | Category | Local regex signatures (case-insensitive) | Default `next_action` |
-  |----------|-------------------------------------------|------------------------|
-  | **Locator** | `NoSuchElementException`, `TimeoutException.*find`, `Unable to locate element`, `locator.*not found` | Check locator YAML for the failing element; rerun with `accessibility_id` fallback |
-  | **Env** | `ConnectionRef`, `adb.*not found`, `4723.*refused`, `Appium server.*not`, `device offline` | Verify Appium server is running on `:4723`; check `adb devices` |
-  | **Script** | `ImportError`, `ModuleNotFoundError`, `AttributeError`, `TypeError`, `AssertionError`, `NameError`, `IndentationError` | Read the traceback; fix the Python error directly |
-  | **App Bug** | `ANR`, `App crashed`, `not responding`, `java\.lang\.`, `has stopped`, `element.*not enabled`, `validation.*expected.*got` | Open the app on emulator; reproduce manually; file a bug if reproducible |
-  | **Data** | `KeyError.*test_data`, `missing.*required field`, `yaml.*not found`, `HiveError` | Check `data/test_data.yaml` has the required key; reset Hive DB if polluted |
+  | Field | Type | Rule |
+  |-------|------|------|
+  | `category` | enum string | One of `Locator`, `App Bug`, `Env`, `Script`, `Data`, `Unknown` |
+  | `confidence` | float | Clamped to `0.0..1.0` |
+  | `reasoning` | string | Concise, max 500 characters; never contains secrets or the full traceback |
+  | `next_action` | string | Concrete engineer action, max 500 characters |
+  | `classifier` | string | `local`, `llm`, or `disabled` |
+  | `matched_signatures` | tuple/list | Local signature IDs only; empty for LLM/disabled results |
 
-  **Files touched**: `ai/triage.py` (new, ~80 lines), `conftest.py` (extend Task 11's `pytest_runtest_makereport` hook with triage call AFTER the screenshot save).
+  The Allure JSON attachment MUST include the fields above plus `schema_version`, `test_name`, and failing `phase`. Serialization uses `dataclasses.asdict()`; no raw exception object is serialized.
+
+  **Architecture (2 stages)**:
+
+  1. **Local weighted heuristic (always on)** — compile `LOCAL_SIGNATURES` once at module import, then match normalized `error_msg + traceback`. Each signature has its own confidence. Choose the highest-confidence match; ties use `Env > Locator > Data > App Bug > Script`. Return immediately only when confidence is `>= 0.70`. Do not add weak matches together: multiple generic strings must not manufacture high confidence. This stage performs no file, environment, or network I/O.
+  2. **Claude fallback (explicit opt-in)** — runs only when local confidence is below `0.70` **and** `AI_TRIAGE_LLM_ENABLED=1`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL` are all present. Use the Anthropic Messages API through the Python standard library (or an injected callable in tests); do not add an SDK dependency outside §1. One request maximum, no retry, 5-second total timeout. Any timeout, HTTP error, missing config, malformed JSON, unknown category, or invalid field returns `Unknown / 0.0` without raising.
+
+  **Required local signatures** (`re.IGNORECASE`; `re.DOTALL` only for bounded contextual patterns):
+
+  | Category | Signature ID / regex intent | Confidence | Default `next_action` |
+  |----------|-----------------------------|------------|-----------------------|
+  | **Env** | `connection_refused`: `ConnectionRefused(?:Error)?`, `ECONNREFUSED`, or `Failed to establish a new connection` near `4723`/Appium | `0.98` | Verify Appium is listening on `:4723`; inspect `appium.log` |
+  | **Env** | `device_unavailable`: `adb.*(?:not found\|No such file)`, `device (?:offline\|unauthorized)`, or `no (?:Android )?devices?` | `0.95` | Run `adb devices`; reconnect or boot the target device |
+  | **Locator** | `element_missing`: `NoSuchElement(?:Exception\|Error)` or `Unable to locate element` | `0.98` | Check the named locator YAML entry and current Appium page source |
+  | **Locator** | `locator_timeout`: `TimeoutException` within a bounded context containing `find_element`, `locator`, `accessibility_id`, or `xpath` (in either order) | `0.85` | Confirm page state, then update the locator/fallback if the element changed |
+  | **Data** | `test_data_missing`: `KeyError` near `test_data`/`fixture`/`yaml`, or test-data/YAML text near `missing`, `required`, or `not found` | `0.90` | Validate required keys and row values in `data/` |
+  | **Data** | `database_corrupt`: `HiveError` or corruption text near `data`/`database` | `0.80` | Reset the local app database and verify the seed/setup path |
+  | **App Bug** | `app_crash`: `ANR`, `App crashed`, `not responding`, `has stopped`, or `java\.lang\.` | `0.98` | Reproduce manually on the same build/device and file an app bug if repeatable |
+  | **App Bug** | `business_mismatch`: `validation`/`summary`/`saved transaction` near `expected` and `actual`/`got`/`displayed`/`missing` | `0.82` | Compare the displayed state with the requirement and reproduce manually |
+  | **App Bug** | `element_disabled`: `element.*not enabled` | `0.60` | Ambiguous; gather page state and allow LLM/Unknown rather than short-circuiting |
+  | **Script** | `python_structure`: `ImportError`, `ModuleNotFoundError`, `NameError`, `SyntaxError`, or `IndentationError` | `0.98` | Fix the Python/import error directly |
+  | **Script** | `python_contract`: `AttributeError` or `TypeError` | `0.90` | Read the top project frame and correct the API/type usage |
+  | **Script** | `generic_assertion`: bare `AssertionError` | `0.40` | Ambiguous by itself; do not classify as Script without stronger context |
+
+  **Input normalization and privacy**:
+  - Input keys: `error_msg`, `traceback`, and optional `test_name`, `phase`, `screenshot_path`. For command-line/backward compatibility, missing `test_name` defaults to `unknown` and missing `phase` defaults to `call`.
+  - Limit `error_msg` to 2,000 characters and traceback to the final 12,000 characters before LLM use.
+  - Redact authorization headers, API keys/tokens, and URL query strings before attachment or network use.
+  - Multi-modal input is out of scope. Send only `screenshot_available` and the screenshot basename; never upload image bytes or an absolute local path.
+  - Treat exception text and traceback as untrusted quoted data. The system prompt explicitly says to ignore instructions embedded in failure text and exposes no tools.
+  - Prompt for one JSON object only (`temperature=0`, small bounded output). Validate category allowlist, numeric confidence, non-empty bounded strings, and ignore unknown response fields.
+
+  **pytest / Allure integration**:
+  - Extend Task 11's `pytest_runtest_makereport` hook **after** `outcome = yield` and report creation.
+  - Triage `setup`, `call`, and `teardown` failures; environment failures commonly happen in setup. Use an `item.stash` key so only the first failing phase is triaged once.
+  - For a `call` failure, capture the Task 11 screenshot first and pass its returned path to triage. Other phases use `screenshot_path=None`.
+  - Attach `AI Triage` with `allure.attachment_type.JSON`, even for `Unknown`, when an Allure lifecycle is active.
+  - Write `[AI Triage] <Category> (<NN%>): <reasoning>` through pytest's `terminalreporter.write_line()` when the failing phase completes, so capture settings do not hide it. Fall back to `print()` only when no terminal reporter exists.
+  - Triage failures are caught and converted to `Unknown`; reporting code must never replace the original test failure.
+
+  **Unit-test isolation**:
+  - Add a `unit` marker. Refactor `reset_app_state` to request the `driver` lazily with `request.getfixturevalue("driver")`; immediately yield for `@pytest.mark.unit` tests so pure triage tests never start Appium or call `adb pm clear`.
+  - Inject the LLM callable. A spy/fake MUST prove that a local `Locator` hit makes zero LLM calls; do not leave `print('local hit')` instrumentation in production code.
+
+  **Files touched**: `ai/__init__.py`, `ai/triage.py`, `tests/unit/test_triage.py`, `conftest.py`, `pytest.ini`.
 
   **Acceptance criteria**:
-  - `python -c "from ai.triage import triage_failure; print(triage_failure({'error_msg': 'NoSuchElementException: ...', 'traceback': '...'}).category)"` returns `Locator`
-  - On a real pytest failure, the Allure report has an `AI Triage` JSON attachment containing `{category, confidence, reasoning, next_action}`
-  - Console prints `[AI Triage] <Category> (<NN%>): <reasoning>` immediately after the failure summary
-  - **Degrades gracefully**: missing `ANTHROPIC_API_KEY` env var → LLM stage returns `category='Unknown', confidence=0.0`, no exception, no crash
-  - Local heuristic runs without any network call (verifiable via `print('local hit')` instrumentation during dev)
+  - `uv run python -c "from ai.triage import triage_failure; print(triage_failure({'error_msg': 'NoSuchElementException: ...', 'traceback': ''}).category)"` prints `Locator`.
+  - `uv run pytest -m unit tests/unit/test_triage.py -q` passes without a running Appium server or connected device.
+  - Unit cases cover every category, precedence, bare `AssertionError -> Unknown` without LLM, missing config, timeout/malformed LLM output, confidence clamping, redaction, and zero network calls on a local hit.
+  - A controlled setup or call failure produces exactly one `AI Triage` JSON attachment with the required schema and one visible console line; the original pytest failure remains unchanged.
+  - Missing `ANTHROPIC_API_KEY` or disabled LLM returns `Unknown`, `confidence=0.0`, `classifier=disabled`, with no exception and no network call.
+  - Local classification has no I/O and is deterministic. Runtime may be benchmarked for information, but no hardware-dependent `<1 ms` assertion is required.
 
-  **Out-of-scope for PoC** (Day 6+ ideas, listed here so Codex doesn't try):
-  - ❌ Multi-modal screenshot analysis (Claude Vision) — adds API cost, can flip on later via `--vision` flag
-  - ❌ Self-learning from engineer feedback ("I marked this as Locator but it was App Bug") — needs labeled dataset
-  - ❌ Caching across runs — flaky-test cache pollution risk
-  - ❌ Localization for non-English error messages
+  **Out-of-scope for PoC**:
+  - Multi-modal screenshot analysis / Claude Vision.
+  - Self-learning from engineer corrections.
+  - Cross-run caching or flaky-test history.
+  - Automatic test retry, failure suppression, or bug filing.
+  - Classification of non-English error messages.
 
   **Commit message**: `feat(ai): failure triage with local heuristic + LLM fallback`
 
 **Optional Day 5 task** (post-challenge extension):
-- **Task 14**: Excel ↔ .feature Sync Engine — `scripts/sync_engine.py` reads `data/test_cases.xlsx`, diffs against `tests/features/*.feature` by `scenario_id` comment, writes back only `added` / `modified` rows, leaves untouched scenarios byte-identical. `data/test_cases_template.xlsx` ships as the starting registry. See §11 for full design. Commit message: `feat(sync): excel ↔ feature sync engine PoC`.
+- **Task 14**: Excel → `.feature` Sync Engine — `data/test_cases.xlsx` is authoritative only for managed Scenario blocks identified by `scenario_id`; Feature headers and Background blocks remain code-owned. The engine routes rows by Module, validates the complete workbook before writing, applies only `added` / `modified` / explicitly `deprecated` blocks through a backup/replace/rollback transaction, and leaves untouched managed blocks byte-identical. `data/test_cases_template.xlsx` ships as the bootstrap registry. See §11 for the full contract. Commit message: `feat(sync): excel-to-feature sync engine PoC`.
 
 ---
 
@@ -1028,100 +1073,201 @@ git rebase -i HEAD~3            # mark 8b as "squash"
 
 ---
 
-## 11. Living Documentation: Excel ↔ Feature Sync (Day 5 extension)
+## 11. Living Documentation: Excel → Feature Sync (Day 5 extension)
 
-> ⚠️ **This section is OPTIONAL for the 4-6h challenge.** Tasks 1-12 must complete first. Task 14 (sync engine PoC) ships separately as `feat(sync): ...` after the main 13 commits land.
+> **This section is optional for the challenge.** Tasks 1-12 complete first. Task 14 ships as a separate `feat(sync): ...` commit. The arrow is intentionally one-way: the PoC never writes test results or scenario edits from `.feature` back to Excel.
 
-### 11.1 Why this section exists
+### 11.1 Ownership Model
 
-Industry practice (Google / Microsoft / Amazon / Spotify / Tencent) for BDD at scale converges on three ideas:
+The synchronization contract is hybrid, not "Excel owns every byte":
 
-1. **Manual test cases live in Excel / TestRail** (testers edit freely; not gated by Git workflow)
-2. **Automated scenarios live in `.feature` files** (versioned, peer-reviewed, executable)
-3. **A sync layer keeps the two in lockstep** by `scenario_id` (stable anchor; survives content changes)
+| Artifact region | Owner | Sync behavior |
+|-----------------|-------|---------------|
+| Excel row for a managed test case | Excel | Source for scenario metadata, tags, When/Then steps, and lifecycle status |
+| Managed Scenario block beginning with `# scenario_id:` | Excel | Added, replaced, or explicitly deprecated by ID |
+| `Feature:` line, file comments, and `Background:` block | Code / reviewer | Never generated or rewritten by the PoC |
+| Step definitions, Pages, Flows, locators | Code | Never modified by sync |
+| `Last Run Result` and review metadata | QA / future CI | Read-only to this PoC; never written back |
 
-Without a sync layer, the two drift: Excel says "TC_001 is automated", code says "where is TC_001?". With a sync layer, Excel is the **single source of truth** and `.feature` is the **generated artifact**.
+This boundary keeps common first-run setup in the code-reviewed Background while allowing QA to maintain individual scenario actions and assertions. "Excel source of truth" means **source of truth for managed Scenario blocks only**.
 
-### 11.2 Scenario ID Convention (mandatory for Task 14)
+### 11.2 Canonical Managed Block and Scenario IDs
 
-Every scenario in `tests/features/*.feature` MUST start with a `scenario_id` comment derived from the Excel `Test Case ID` column. The sync engine uses this comment as the diff anchor — without it, sync cannot run.
+Task 14 MUST first add IDs to all seven existing scenarios using the IDs already present in `data/test_cases_template.xlsx`. A managed block has this canonical order:
 
 ```gherkin
-@smoke @p0
 # scenario_id: TC_ADD_TX_001
 # introduced_in: 1.0.0
-# platforms: android, ios
+# platforms: android
+@smoke @p0
 Scenario: Add expense happy path
+  When user taps "Add Expense"
+  And user enters amount "100"
   ...
 ```
 
+`# deprecated_in: <version>` is optional and appears after `# introduced_in:` only when populated. Therefore there are **three mandatory metadata comments** (`scenario_id`, `introduced_in`, `platforms`) plus one optional deprecation comment; tags are not comment lines.
+
+**ID mapping for the current inventory**:
+
+| Scenario | ID | Module |
+|----------|----|--------|
+| Add expense happy path | `TC_ADD_TX_001` | `add_transaction` |
+| Add income happy path | `TC_ADD_TX_002` | `add_transaction` |
+| Add transfer happy path | `TC_ADD_TX_003` | `add_transaction` |
+| Validation — empty amount shows error and does not save | `TC_ADD_TX_004` | `add_transaction` |
+| Add expense with new custom category created in flow | `TC_ADD_TX_005` | `add_transaction` |
+| Filter transactions by type shows only matching type | `TC_TXN_001` | `transactions` |
+| Transactions grouped by date with section headers | `TC_TXN_002` | `transactions` |
+
 **Rules**:
-- `scenario_id` MUST be unique across all .feature files (enforced by sync engine)
-- Format: `TC_<MODULE>_<NNN>` (e.g., `TC_ADD_TX_001`)
-- `# introduced_in:` and `# platforms:` are optional but recommended (drive Q2 version-aware selection)
-- All four comment lines are added by Codex in Task 8 / 8b / 10 — not optional
+- ID format: `^TC_[A-Z][A-Z0-9_]*_[0-9]{3}$`.
+- An ID MUST be unique in the workbook and across every feature file. Duplicate IDs are a hard error before any write.
+- `Module` uses an allowlist, not a path: `add_transaction -> tests/features/add_transaction.feature`, `transactions -> tests/features/transactions.feature`. Unknown values are errors; never concatenate untrusted Module text into a path.
+- A managed block starts at a line whose exact prefix is `# scenario_id:` and ends immediately before the next managed block or EOF. Content before the first managed block is code-owned.
+- Tags are rendered after metadata and immediately before `Scenario:`. Comma-delimited Excel tags become space-delimited Gherkin tags (`smoke,p0 -> @smoke @p0`). Priority is injected as one canonical tag and deduplicated.
+- The PoC supports `Scenario:` only. `Scenario Outline` / `Examples` synchronization is out of scope.
+- A feature scenario that has no ID after the initial seven-scenario migration is a validation error, not an implicit addition/deletion candidate.
 
 ### 11.3 Excel Schema (`data/test_cases_template.xlsx`)
 
-The shipped template has 11 L1 columns (mandatory) + 5 L2 columns (recommended). See the actual file for column headers; here's the contract:
+The actual template contains 16 columns: 11 L1 registry columns and 5 L2 automation columns. Every header is mandatory. "Nullable" or "recommended" below applies to row values, not header presence.
 
-| Column | Required | Purpose | Maps to .feature |
-|--------|----------|---------|------------------|
-| **Test Case ID** | ✅ | Anchor | `# scenario_id:` comment |
-| **Module** | ✅ | Routing | `.feature` filename |
-| **Scenario Title** | ✅ | Human name | `Scenario:` line |
-| **Priority** | ✅ | Tag | `@p0` / `@p1` / `@p2` marker |
-| **App Version Introduced** | ✅ | Selection (Q2) | `# introduced_in:` comment |
-| **App Version Deprecated** | ✅ (nullable) | Selection (Q2) | `# deprecated_in:` comment |
-| **Platform** | ✅ | Filter (Q2) | `# platforms:` comment |
-| **Automation Status** | ✅ | Sync gate | row only processed if `automated` |
-| **Tags** | ⚠️ Recommended | Marker mapping | `@smoke`, `@custom_category`, etc. |
-| **Pre-conditions** | ⚠️ Recommended | Given | `Given ...` line |
-| **Test Steps** | ⚠️ Recommended | When | `When ...` lines |
-| **Expected Result** | ⚠️ Recommended | Then | `Then ...` lines |
+| Column | Row value | Purpose | PoC behavior |
+|--------|-----------|---------|--------------|
+| **Test Case ID** | Required | Stable anchor | `# scenario_id:` |
+| **Module** | Required | Safe routing | Validated allowlist; selects one feature file |
+| **Scenario Title** | Required | Human-readable name | `Scenario:` text |
+| **Priority** | Required: `P0`, `P1`, `P2` | Selection | Normalized to one lowercase priority tag |
+| **App Version Introduced** | Required | Version selection | `# introduced_in:` |
+| **App Version Deprecated** | Nullable; required for `deprecated` | Lifecycle | Optional `# deprecated_in:` |
+| **Platform** | Required: `android`, `ios`, or `both` | Platform selection | `both` renders `android, ios` in `# platforms:` |
+| **Automation Status** | Required enum | Lifecycle gate | See status rules below |
+| **Author** | Required registry metadata | Ownership | Validated non-empty; not rendered |
+| **Last Reviewed Date** | Required ISO date | Auditability | Validated; not rendered |
+| **Last Run Result** | Required registry metadata | Execution visibility | Read-only/ignored by this PoC |
+| **Tags** | Recommended | pytest markers | Comma-delimited, no leading `@`; rendered with priority deduplication |
+| **Pre-conditions** | Recommended metadata | Manual-test context | Not rendered in PoC; file Background remains code-owned |
+| **Test Steps** | Required for `automated` | Scenario actions | One vocabulary phrase per newline; first renders `When`, remaining render `And` |
+| **Expected Result** | Required for `automated` | Scenario assertions | One vocabulary phrase per newline; first renders `Then`, remaining render `And` |
+| **Estimated Runtime (s)** | Recommended positive integer | Planning | Validated when present; not rendered |
 
-**Status values** for `Automation Status`:
-- `manual` — only lives in Excel, sync skips
-- `automated` — sync pushes to `.feature`
-- `candidate` — QA candidate, sync skips (for human review)
-- `deprecated` — sync moves the scenario to a `# DEPRECATED:` comment block
+Do not split steps on semicolons: notes and messages may legitimately contain them. Excel cells use newline-delimited phrases **without** `Given`/`When`/`Then`/`And` keywords; the renderer adds keywords and indentation deterministically.
 
-### 11.4 Sync Engine PoC (`scripts/sync_engine.py`)
+**Automation Status rules**:
+- `manual` / `candidate`: ignored when no managed feature block exists. If the ID already exists in a feature, stop with an error and require an explicit transition to `deprecated`; never silently remove executable coverage.
+- `automated`: add or update the routed managed block.
+- `deprecated`: requires `App Version Deprecated` and an existing managed block; deprecating an ID that was never generated is an error. Keep the metadata comments parseable, but comment the tags, Scenario line, and body between deterministic `DEPRECATED BEGIN/END <ID>` markers. Do not infer deprecation from a missing row.
+- A managed feature ID absent from the workbook is a hard error. Missing Excel rows never mean delete.
 
-~30-line script. Reads `data/test_cases.xlsx`, diffs each row against `tests/features/*.feature` by `scenario_id`, applies `added` / `modified` rows, comments-out `deleted` rows. **Untouched scenarios are byte-identical after the run** — the sync engine never re-serializes a scenario it didn't change.
+Canonical deprecated form:
 
-Run modes:
-
-```bash
-# One-shot diff + apply
-python scripts/sync_engine.py
-
-# Watch mode (auto-trigger on xlsx change, 5s debounce)
-python scripts/sync_engine.py --watch
-
-# Dry-run (print diff without writing)
-python scripts/sync_engine.py --dry-run
+```gherkin
+# scenario_id: TC_ADD_TX_005
+# introduced_in: 1.0.0
+# deprecated_in: 2.0.0
+# platforms: android
+# DEPRECATED BEGIN TC_ADD_TX_005
+# @p1 @custom_category
+# Scenario: Add expense with new custom category created in flow
+#   When ...
+#   Then ...
+# DEPRECATED END TC_ADD_TX_005
 ```
 
-Implementation constraints (PoC):
-- Uses `openpyxl` for Excel parsing (per §1)
-- Uses **regex** for `.feature` parsing — does NOT depend on the `gherkin` Python library (per §1 do-not-add)
-- Writes a timestamped backup to `data/.backup/<file>.<date>.bak` before every modification
-- Refuses to commit if `pytest --collect-only` fails after a write (caller's responsibility in Day 5+)
+**Bootstrap data reconciliation (mandatory before first apply)**:
+- Copy `data/test_cases_template.xlsx` to `data/test_cases.xlsx`; the working registry is the Task 14 input.
+- Update all seven rows to match §6.7 exactly before generating features. The current template is an early draft: it still contains `Coffee` instead of `baby cost`, old compound `user adds ...` phrases, missing tag/date actions, incomplete persistence/monthly-summary assertions, and `Platform=both` even though only Android is device-validated. Use `android` until iOS scenarios pass on a simulator.
+- Preserve the template as a reusable example, but update it to the same corrected seven-row baseline so a new copy does not reintroduce drift.
 
-### 11.5 Out-of-Scope for PoC (deferred to Day 6+)
+### 11.4 Sync Engine Interface (`scripts/sync_engine.py`)
 
-These are explicitly NOT in the PoC, listed here so Codex / future-you don't try to add them:
+The existing script is a scaffold and does **not** satisfy this contract until Task 14 refactors it. In particular, rows must be routed by Module rather than compared/appended to every feature file.
 
-- ❌ Bidirectional sync (writing `Last Run Result` back to Excel) — requires CI integration
-- ❌ Auto-PR creation (sync writes to a `sync/<date>` branch, not main) — needs GitHub API token
-- ❌ Multi-Excel-file merging — single source for now
-- ❌ LLM-generated row proposals — see `docs/SCALING.md` §4 for the AI-assisted flow design
-- ❌ Real-time file-watch triggers in CI — `--watch` mode is for local dev only
+Safe run modes:
 
-### 11.6 Reference
+```bash
+# Default: validate + diff only; no writes. Exit 1 when drift exists.
+uv run python scripts/sync_engine.py --check
 
-For the full Q1-Q6 strategic context (industry practices, version-aware regression, doc-driven sync, AI from screenshots, Excel field rationale), see [`docs/SCALING.md`](SCALING.md). Codex SHOULD read it once at Task 14 commit time but MUST NOT block Tasks 1-12 on it.
+# Explicit mutation after full validation
+uv run python scripts/sync_engine.py --apply
+
+# Local-only watcher; mutation still requires --apply
+uv run python scripts/sync_engine.py --watch --apply
+
+# Optional non-default registry path for tests/local experiments
+uv run python scripts/sync_engine.py --check --input /path/to/test_cases.xlsx
+```
+
+`--check` is the default when neither `--check` nor `--apply` is supplied. `--check` and `--apply` are mutually exclusive. `--watch` without `--apply` reports drift only. Diff categories are `added`, `modified`, `deprecated`, `unchanged`, and `errors`; there is no implicit `deleted` category.
+
+Exit codes:
+- `0`: valid and no drift (`--check`), or apply succeeded and post-write collection passed.
+- `1`: valid but drift exists in `--check` mode.
+- `2`: schema, duplicate, routing, parsing, I/O, lock, render, or post-write collection error.
+
+### 11.5 Validation, Transactional Safety, and Rollback
+
+The engine MUST complete all workbook and feature validation before the first write:
+
+- required headers and required row values;
+- ID format/uniqueness and feature ID uniqueness;
+- allowed Module, status, priority, platform, and tag syntax;
+- non-empty newline-delimited Test Steps / Expected Result for automated rows;
+- one routed feature per automated/deprecated row;
+- no managed feature ID missing from the workbook;
+- no unmanaged `Scenario:` left after the initial ID migration;
+- no duplicate scenario title within a module;
+- UTF-8 feature decoding and one detected newline style per file.
+
+Apply is a best-effort transaction across all affected feature files (Python/OS cannot atomically replace multiple files in one operation):
+
+1. Acquire `data/.backup/sync.lock` atomically; store PID/timestamp and fail instead of running concurrent apply/watch writers. A stale lock is removed manually only after confirming that PID is no longer running.
+2. Render every target file fully in memory. Preserve original UTF-8 encoding, newline style, code-owned prefix, and every unchanged managed block by exact string slicing.
+3. Before **each** changing apply, write timestamped backups with microseconds to `data/.backup/<feature>.<YYYYMMDDTHHMMSSffffff>.bak`. Never reuse a once-per-day backup name.
+4. Write each rendered file to a temporary file in the same directory, flush it, then use `os.replace()`; no direct `Path.write_text()` over the target.
+5. Run `[sys.executable, "-m", "pytest", "--collect-only", "-q"]` once after all replacements.
+6. If any replacement or collection fails, restore every affected file from that run's backup, report the original error plus rollback status, and exit `2`.
+7. Always remove temporary files and release the lock in `finally`. Process-kill/power-loss journaling between multiple `os.replace()` calls is out of scope.
+
+The engine never edits either workbook. `data/.backup/` remains gitignored. Watch mode uses `watchdog` with a 5-second debounce and invokes the same validated transaction; it is not a separate write path.
+
+**Byte-identical guarantee** means the encoded byte slice for every `unchanged` managed block has the same SHA-256 before and after a successful apply. It does not mean a modified block or necessary separator around it remains unchanged.
+
+### 11.6 Tests and Acceptance Criteria
+
+**Files touched**: `scripts/sync_engine.py`, `data/test_cases.xlsx`, `data/test_cases_template.xlsx`, both feature files (initial IDs/metadata), `tests/unit/test_sync_engine.py`, `.github/workflows/ci.yml`, plus `conftest.py` / `pytest.ini` only if the `unit` isolation marker from Task 13 is not already present.
+
+All sync tests use temporary workbook/feature copies. They MUST NOT mutate repository feature files or the checked-in registry.
+
+Acceptance criteria:
+
+- Parsing the corrected registry returns exactly seven automated rows routed as five `add_transaction` and two `transactions` cases.
+- Initial Task 14 feature files contain the seven unique IDs from §11.2 and still collect the same seven BDD scenarios.
+- `uv run python scripts/sync_engine.py --check` exits `0` on the committed state and performs zero writes.
+- Changing one Excel amount/title/step in a temporary copy reports exactly one `modified` block in the correct module; the other feature file is byte-identical.
+- Running `--apply` twice is idempotent: the second run reports no drift and both feature-file hashes remain unchanged.
+- Unit tests cover duplicate IDs (Excel and cross-feature), unknown Module, invalid enum/required fields, tag normalization, status transitions, missing workbook IDs, unsupported Scenario Outline, and newline preservation.
+- A forced post-write collection failure restores all affected files and leaves no lock/temp file.
+- SHA-256 assertions prove untouched managed blocks are byte-identical after neighboring add/modify/deprecate operations.
+- Workbook hash is identical before and after every mode, including `--apply` and `--watch`.
+- CI `validate` runs `uv run python scripts/sync_engine.py --check` before pytest collection once Task 14 lands.
+- Full verification passes: unit sync tests, seven BDD scenarios collected, and `git diff --check` clean.
+
+### 11.7 Out-of-Scope for PoC
+
+- Bidirectional sync or writing `Last Run Result` back to Excel.
+- Automatic deletion based on a missing row.
+- Auto-PR/branch creation or committing from the script.
+- Multi-workbook merge and conflict resolution.
+- Scenario Outline / Examples generation.
+- LLM-generated row proposals (see `docs/SCALING.md` §4).
+- File watching in CI; `--watch` is local development only.
+
+### 11.8 Reference
+
+For the broader Q1-Q6 roadmap, version-aware regression, and document-driven testing context, see [`docs/SCALING.md`](SCALING.md). Read it at Task 14 implementation time; it does not block Tasks 1-12.
 
 ---
 
