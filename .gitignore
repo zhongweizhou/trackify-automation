@@ -1,0 +1,21 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.python-version
+.venv/
+venv/
+
+# Local mobile app bundles and generated artifacts
+app/
+report/allure-results/
+report/screenshots/
+allure-results/
+allure-report/
+data/.backup/
+
+# IDE/editor
+.idea/
+.vscode/
