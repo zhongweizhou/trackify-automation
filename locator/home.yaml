@@ -12,6 +12,13 @@ home_tab:
   ios:
     accessibility_id: "Home"
 
+monthly_summary:
+  description: "This Month balance, income, expense, and budget percentage"
+  android:
+    class: "android.widget.ProgressBar"
+  ios:
+    class: "XCUIElementTypeProgressIndicator"
+
 add_expense_button:
   description: "Home shortcut to open Add Transaction with Expense selected"
   android:
@@ -53,6 +60,13 @@ recent_transaction_amount:
     xpath: "//*[contains(@content-desc, '{amount}')]"
   ios:
     predicate: "label CONTAINS '{amount}'"
+
+recent_transaction_category:
+  description: "Recent transaction row containing a category name"
+  android:
+    xpath: "//*[contains(@content-desc, '{category}')]"
+  ios:
+    predicate: "label CONTAINS '{category}'"
 
 empty_transactions_message:
   description: "Empty state shown when there are no recent transactions"

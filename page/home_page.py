@@ -3,9 +3,30 @@
 from __future__ import annotations
 
 import os
+import re
+from dataclasses import dataclass
+from decimal import Decimal
 
 from page.base_page import BasePage
 from utils.locator_loader import Locator, load_locator
+
+_MONTHLY_SUMMARY_PATTERN = re.compile(
+    r"This Month\s*\n"
+    r"(?P<balance>\$-?[\d,.]+)\s*\n"
+    r"Income\s*\n(?P<income>\$[\d,.]+)\s*\n"
+    r"Expense\s*\n(?P<expense>\$[\d,.]+)\s*\n"
+    r"(?P<percent>\d+)%"
+)
+
+
+@dataclass(frozen=True)
+class MonthlySummary:
+    """Numeric values displayed by the Home This Month panel."""
+
+    balance: Decimal
+    income: Decimal
+    expense: Decimal
+    percent: int
 
 
 class HomePage(BasePage):
@@ -52,6 +73,27 @@ class HomePage(BasePage):
         """Open the Transactions page from the Recent Transactions section."""
         self.click(self._loc("see_all_transactions_button"))
 
+    def monthly_summary(self) -> MonthlySummary:
+        """Parse and return all values from the This Month panel.
+
+        Raises:
+            AssertionError: If the panel's accessibility text is unexpected.
+        """
+        description = self.wait_for(self._loc("monthly_summary")).get_attribute(
+            "content-desc"
+        )
+        match = _MONTHLY_SUMMARY_PATTERN.search(description or "")
+        if not match:
+            raise AssertionError(
+                f"Could not parse This Month summary from {description!r}."
+            )
+        return MonthlySummary(
+            balance=self._parse_usd(match.group("balance")),
+            income=self._parse_usd(match.group("income")),
+            expense=self._parse_usd(match.group("expense")),
+            percent=int(match.group("percent")),
+        )
+
     def has_recent_transactions_section(self) -> bool:
         """Return whether the Recent Transactions section is visible.
 
@@ -70,6 +112,20 @@ class HomePage(BasePage):
             True when a recent transaction row contains the amount.
         """
         return self.is_visible(self._loc("recent_transaction_amount", amount=amount))
+
+    def has_recent_transaction_category(self, category: str) -> bool:
+        """Return whether a recent transaction contains a category.
+
+        Args:
+            category: Category name expected in the recent transaction row.
+
+        Returns:
+            True when the category is visible, otherwise False.
+        """
+        return self.is_visible(
+            self._loc("recent_transaction_category", category=category),
+            timeout=3,
+        )
 
     def has_empty_transactions_message(self) -> bool:
         """Return whether the empty Recent Transactions state is visible.
@@ -108,3 +164,7 @@ class HomePage(BasePage):
         if format_values:
             value = value.format(**format_values)
         return strategy, value
+
+    @staticmethod
+    def _parse_usd(value: str) -> Decimal:
+        return Decimal(value.replace("$", "").replace(",", ""))

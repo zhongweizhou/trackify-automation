@@ -15,6 +15,7 @@ from flow.app_setup_flow import AppSetupFlow
 from page.add_transaction_page import AddTransactionPage
 from page.home_page import HomePage
 from page.onboarding_page import OnboardingPage
+from page.transactions_page import TransactionsPage
 
 PKG = os.getenv("ANDROID_PACKAGE", "com.blixcode.trackify")
 
@@ -142,6 +143,19 @@ def add_transaction_page(driver: Any) -> AddTransactionPage:
 
 
 @pytest.fixture
+def transactions_page(driver: Any) -> TransactionsPage:
+    """Create a Transactions page object for the current test.
+
+    Args:
+        driver: The active Appium driver fixture.
+
+    Returns:
+        Transactions page object bound to the active driver.
+    """
+    return TransactionsPage(driver)
+
+
+@pytest.fixture
 def app_setup_flow(
     onboarding_page: OnboardingPage,
     home_page: HomePage,
@@ -162,17 +176,19 @@ def app_setup_flow(
 def add_transaction_flow(
     home_page: HomePage,
     add_transaction_page: AddTransactionPage,
+    transactions_page: TransactionsPage,
 ) -> AddTransactionFlow:
     """Create an Add Transaction flow for the current test.
 
     Args:
         home_page: Home page fixture.
         add_transaction_page: Add Transaction page fixture.
+        transactions_page: Transactions page fixture.
 
     Returns:
         Flow object composed from page fixtures.
     """
-    return AddTransactionFlow(home_page, add_transaction_page)
+    return AddTransactionFlow(home_page, add_transaction_page, transactions_page)
 
 
 def _adb() -> str:
