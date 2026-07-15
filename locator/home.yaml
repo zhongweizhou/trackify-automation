@@ -47,9 +47,37 @@ recent_transactions_title:
   ios:
     accessibility_id: "Recent Transactions"
 
+recent_transaction_amount:
+  description: "Recent transaction row containing a formatted amount"
+  android:
+    xpath: "//*[contains(@content-desc, '{amount}')]"
+  ios:
+    predicate: "label CONTAINS '{amount}'"
+
+empty_transactions_message:
+  description: "Empty state shown when there are no recent transactions"
+  android:
+    accessibility_id: "No transactions yet"
+  ios:
+    accessibility_id: "No transactions yet"
+
 see_all_transactions_button:
   description: "Link from Home recent transactions to the Transactions page"
   android:
     accessibility_id: "See All"
   ios:
     accessibility_id: "See All"
+
+user_name:
+  description: "Home greeting containing the configured profile name"
+  android:
+    xpath: "//*[contains(@content-desc, '{name}')]"
+  ios:
+    predicate: "label CONTAINS '{name}'"
+
+currency_summary:
+  description: "Home monthly summary containing the configured currency"
+  android:
+    xpath: "//*[contains(@content-desc, '{symbol}0.00')]"
+  ios:
+    predicate: "label CONTAINS '{symbol}0.00'"

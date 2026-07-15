@@ -1,0 +1,69 @@
+name_page:
+  description: "First-run profile page asking for the user's name"
+  android:
+    accessibility_id: "What's your name?"
+  ios:
+    accessibility_id: "What's your name?"
+
+name_input:
+  description: "Name input on the first onboarding page"
+  android:
+    xpath: "//android.view.View[@content-desc=\"What's your name?\"]/android.widget.EditText"
+  ios:
+    xpath: "(//XCUIElementTypeTextField)[1]"
+
+continue_button:
+  description: "Continue to the next onboarding page"
+  android:
+    accessibility_id: "Continue"
+  ios:
+    accessibility_id: "Continue"
+
+budget_page:
+  description: "Onboarding page for currency and monthly budget"
+  android:
+    xpath: "//android.view.View[contains(@content-desc, 'Set Your Budget') and contains(@content-desc, 'Monthly Budget')]"
+  ios:
+    predicate: "label CONTAINS 'Set Your Budget' AND label CONTAINS 'Monthly Budget'"
+
+currency_selector:
+  description: "Current currency selector on the budget setup page"
+  android:
+    xpath: "//android.view.View[contains(@content-desc, 'Monthly Budget')]/android.widget.Button"
+  ios:
+    xpath: "//XCUIElementTypeOther[contains(@label, 'Monthly Budget')]/XCUIElementTypeButton"
+
+currency_option:
+  description: "Currency option selected by its visible label"
+  android:
+    accessibility_id: "{currency}"
+  ios:
+    accessibility_id: "{currency}"
+
+budget_slider:
+  description: "Monthly budget slider"
+  android:
+    class: "android.widget.SeekBar"
+  ios:
+    class: "XCUIElementTypeSlider"
+
+tracking_page:
+  description: "Final onboarding page containing tracking preferences"
+  android:
+    xpath: "//android.view.View[contains(@content-desc, 'Stay on Track') and contains(@content-desc, 'Bank SMS Reader')]"
+  ios:
+    predicate: "label CONTAINS 'Stay on Track' AND label CONTAINS 'Bank SMS Reader'"
+
+bank_sms_reader_switch:
+  description: "Second switch on Stay on Track, for Bank SMS Reader"
+  android:
+    xpath: "//android.view.View[contains(@content-desc, 'Bank SMS Reader')]/android.widget.Switch[2]"
+  ios:
+    xpath: "(//XCUIElementTypeSwitch)[2]"
+
+get_started_button:
+  description: "Finish onboarding and open Home"
+  android:
+    accessibility_id: "Get Started"
+  ios:
+    accessibility_id: "Get Started"
