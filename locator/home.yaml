@@ -12,6 +12,13 @@ home_tab:
   ios:
     accessibility_id: "Home"
 
+monthly_summary:
+  description: "This Month balance, income, expense, and budget percentage"
+  android:
+    class: "android.widget.ProgressBar"
+  ios:
+    class: "XCUIElementTypeProgressIndicator"
+
 add_expense_button:
   description: "Home shortcut to open Add Transaction with Expense selected"
   android:

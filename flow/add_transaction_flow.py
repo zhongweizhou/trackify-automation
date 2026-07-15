@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import uuid4
 
 from page.add_transaction_page import AddTransactionPage
-from page.home_page import HomePage
+from page.home_page import HomePage, MonthlySummary
+from page.transactions_page import TransactionsPage
 
 SUPPORTED_TRANSACTION_TYPES = frozenset({"expense", "income", "transfer"})
+CATEGORY_DISPLAY_NAMES = {
+    "Food": "Food & Dining",
+    "Bills": "Bills & Utilities",
+}
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,16 @@ class TransactionResult:
     category: str
 
 
+@dataclass(frozen=True)
+class SavedTransactionExpectation:
+    """UI values captured before a transaction is submitted."""
+
+    transaction_type: str
+    amount: Decimal
+    category: str
+    selected_at: datetime
+
+
 class AddTransactionFlow:
     """Business workflow for adding expense, income, and transfer records."""
 
@@ -36,18 +52,23 @@ class AddTransactionFlow:
         self,
         home_page: HomePage,
         add_transaction_page: AddTransactionPage,
-        transactions_page: object | None = None,
+        transactions_page: TransactionsPage | None = None,
     ) -> None:
         """Initialize the flow with page objects injected by pytest fixtures.
 
         Args:
             home_page: Home page object.
             add_transaction_page: Add Transaction page object.
-            transactions_page: Optional Transactions page object for later tasks.
+            transactions_page: Optional Transactions page for list assertions.
         """
         self._home_page = home_page
         self._add_transaction_page = add_transaction_page
         self._transactions_page = transactions_page
+        self._baseline_summary: MonthlySummary | None = None
+        self._draft_type: str | None = None
+        self._draft_amount: Decimal | None = None
+        self._draft_category: str | None = None
+        self._saved_transaction: SavedTransactionExpectation | None = None
 
     def add_expense(
         self,
@@ -161,6 +182,7 @@ class AddTransactionFlow:
     def ensure_home_page(self) -> None:
         """Verify the preconfigured Home page is visible."""
         self._home_page.verify_visible()
+        self._baseline_summary = self._home_page.monthly_summary()
 
     def tap_add_shortcut(self, shortcut_name: str) -> None:
         """Tap a Home shortcut that opens the Add Transaction form.
@@ -177,12 +199,15 @@ class AddTransactionFlow:
         if normalized_name == "add expense":
             self._home_page.click_add_expense()
             self._add_transaction_page.select_type("expense")
+            self._begin_draft("expense")
         elif normalized_name == "add income":
             self._home_page.click_add_income()
             self._add_transaction_page.select_type("income")
+            self._begin_draft("income")
         elif normalized_name == "add transfer":
             self._home_page.click_add_transfer()
             self._add_transaction_page.select_type("transfer")
+            self._begin_draft("transfer")
         elif normalized_name == "add new category":
             self._add_transaction_page.tap_add_new_category()
         else:
@@ -196,6 +221,7 @@ class AddTransactionFlow:
         """
         normalized_type = self._validate_transaction_type(transaction_type)
         self._add_transaction_page.select_type(normalized_type)
+        self._draft_type = normalized_type
 
     def enter_amount(self, amount: int | float | str) -> None:
         """Enter the amount on the Add Transaction form.
@@ -205,10 +231,12 @@ class AddTransactionFlow:
         """
         parsed_amount = self._validate_amount(amount)
         self._add_transaction_page.enter_amount(str(parsed_amount))
+        self._draft_amount = parsed_amount
 
     def leave_amount_empty(self) -> None:
         """Leave the Add Transaction amount field empty."""
         self._add_transaction_page.leave_amount_empty()
+        self._draft_amount = None
 
     def select_category(self, category: str) -> None:
         """Select a category on the Add Transaction form.
@@ -216,7 +244,9 @@ class AddTransactionFlow:
         Args:
             category: Existing category name.
         """
-        self._add_transaction_page.select_category(self._validate_category(category))
+        cleaned_category = self._validate_category(category)
+        self._add_transaction_page.select_category(cleaned_category)
+        self._draft_category = cleaned_category
 
     def enter_note(self, note: str) -> None:
         """Enter a note on the Add Transaction form.
@@ -232,13 +262,15 @@ class AddTransactionFlow:
         Args:
             name: Custom category name.
         """
-        self._add_transaction_page.create_custom_category(
-            self._validate_category(name)
-        )
+        cleaned_name = self._validate_category(name)
+        self._add_transaction_page.create_custom_category(cleaned_name)
+        self._draft_category = cleaned_name
 
     def tap_save(self) -> None:
         """Submit the Add Transaction form."""
+        expectation = self._build_saved_expectation()
         self._add_transaction_page.tap_save()
+        self._saved_transaction = expectation
 
     def assert_amount_error(self, message: str) -> None:
         """Assert that an empty amount was rejected.
@@ -296,6 +328,78 @@ class AddTransactionFlow:
             f"Recent Transactions did not show category {cleaned_category!r}."
         )
 
+    def assert_saved_transaction_details(self) -> None:
+        """Assert date, amount, category, and time on Transactions."""
+        expectation = self._require_saved_transaction()
+        transactions_page = self._require_transactions_page()
+        self._open_transactions()
+
+        category = CATEGORY_DISPLAY_NAMES.get(
+            expectation.category,
+            expectation.category,
+        )
+        amount = self._format_list_amount(
+            expectation.transaction_type,
+            expectation.amount,
+        )
+        time = expectation.selected_at.strftime("%I:%M %p").lstrip("0")
+        assert transactions_page.has_transaction(
+            date_label="Today",
+            category=category,
+            amount=amount,
+            time=time,
+        ), (
+            "Transactions did not show one matching row: "
+            f"date='Today', category={category!r}, amount={amount!r}, "
+            f"time={time!r}."
+        )
+
+    def assert_transactions_empty(self) -> None:
+        """Assert that the Transactions page contains no rows."""
+        transactions_page = self._require_transactions_page()
+        self._open_transactions()
+        assert transactions_page.has_no_transactions(), (
+            "Transactions page was expected to be empty."
+        )
+
+    def assert_monthly_summary(self, budget: int | float | str) -> None:
+        """Assert This Month values using transaction and budget rules.
+
+        Args:
+            budget: Positive configured monthly budget.
+
+        Raises:
+            AssertionError: If any displayed summary value is incorrect.
+        """
+        parsed_budget = self._validate_amount(budget)
+        baseline = self._require_baseline_summary()
+        income = baseline.income
+        expense = baseline.expense
+
+        if self._saved_transaction is not None:
+            if self._saved_transaction.transaction_type == "income":
+                income += self._saved_transaction.amount
+            elif self._saved_transaction.transaction_type == "expense":
+                expense += self._saved_transaction.amount
+
+        expected = MonthlySummary(
+            balance=income - expense,
+            income=income,
+            expense=expense,
+            percent=int(
+                (expense / parsed_budget * Decimal("100")).to_integral_value(
+                    rounding=ROUND_HALF_UP
+                )
+            ),
+        )
+        self._return_to_home()
+        actual = self._home_page.monthly_summary()
+        assert actual == expected, (
+            "This Month summary mismatch. "
+            f"Expected {expected}, displayed {actual}; percentage formula is "
+            "expense / budget * 100 rounded to the nearest integer, half up."
+        )
+
     def _open_add_transaction(self, transaction_type: str) -> None:
         self._home_page.verify_visible()
         if transaction_type == "expense":
@@ -304,6 +408,59 @@ class AddTransactionFlow:
             self._home_page.click_add_income()
         else:
             self._home_page.click_add_transfer()
+
+    def _begin_draft(self, transaction_type: str) -> None:
+        self._draft_type = transaction_type
+        self._draft_amount = None
+        self._draft_category = None
+        self._saved_transaction = None
+
+    def _build_saved_expectation(self) -> SavedTransactionExpectation | None:
+        if (
+            self._draft_type is None
+            or self._draft_amount is None
+            or self._draft_category is None
+        ):
+            return None
+        selected_date_time = " ".join(
+            self._add_transaction_page.selected_date_time().split()
+        )
+        return SavedTransactionExpectation(
+            transaction_type=self._draft_type,
+            amount=self._draft_amount,
+            category=self._draft_category,
+            selected_at=datetime.strptime(
+                selected_date_time,
+                "%d/%m/%Y %H:%M",
+            ),
+        )
+
+    def _open_transactions(self) -> None:
+        transactions_page = self._require_transactions_page()
+        if transactions_page.is_open():
+            return
+        self._home_page.verify_visible()
+        self._home_page.click_see_all_transactions()
+        transactions_page.verify_visible()
+
+    def _return_to_home(self) -> None:
+        if self._transactions_page is not None and self._transactions_page.is_open():
+            self._transactions_page.click_home()
+
+    def _require_transactions_page(self) -> TransactionsPage:
+        if self._transactions_page is None:
+            raise AssertionError("TransactionsPage was not injected into the flow.")
+        return self._transactions_page
+
+    def _require_saved_transaction(self) -> SavedTransactionExpectation:
+        if self._saved_transaction is None:
+            raise AssertionError("No successfully submitted transaction was captured.")
+        return self._saved_transaction
+
+    def _require_baseline_summary(self) -> MonthlySummary:
+        if self._baseline_summary is None:
+            raise AssertionError("Home baseline summary was not captured.")
+        return self._baseline_summary
 
     def _submit_transaction(
         self,
@@ -352,3 +509,15 @@ class AddTransactionFlow:
 
     def _format_recent_amount(self, amount: Decimal) -> str:
         return f"{amount:,.2f}"
+
+    def _format_list_amount(
+        self,
+        transaction_type: str,
+        amount: Decimal,
+    ) -> str:
+        formatted = self._format_recent_amount(amount)
+        if transaction_type == "expense":
+            return f"-${formatted}"
+        if transaction_type == "income":
+            return f"+${formatted}"
+        return f"\u2194 ${formatted}"

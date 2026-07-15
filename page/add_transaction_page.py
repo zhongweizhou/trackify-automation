@@ -178,6 +178,15 @@ class AddTransactionPage(BasePage):
         """
         self._input_text(self._loc("tags_input"), tags)
 
+    def selected_date_time(self) -> str:
+        """Return the date and time currently selected on the form."""
+        value = self.wait_for(self._loc("date_picker_trigger")).get_attribute(
+            "content-desc"
+        )
+        if not value:
+            raise AssertionError("Add Transaction date/time is empty.")
+        return value
+
     def tap_save(self) -> None:
         """Submit the Add Transaction form."""
         self._blur_keyboard_if_needed()

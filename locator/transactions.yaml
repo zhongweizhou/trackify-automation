@@ -1,0 +1,27 @@
+page_title:
+  description: "Transactions page title"
+  android:
+    accessibility_id: "Transactions"
+  ios:
+    accessibility_id: "Transactions"
+
+transaction_entry:
+  description: "Merged date group and transaction row matching all details"
+  android:
+    xpath: "//*[contains(@content-desc, '{date_label}') and contains(@content-desc, '{category}') and contains(@content-desc, '{amount}') and contains(@content-desc, '{time}') ]"
+  ios:
+    predicate: "label CONTAINS '{date_label}' AND label CONTAINS '{category}' AND label CONTAINS '{amount}' AND label CONTAINS '{time}'"
+
+empty_message:
+  description: "Transactions empty state"
+  android:
+    accessibility_id: "No transactions found"
+  ios:
+    accessibility_id: "No transactions found"
+
+home_tab_from_transactions:
+  description: "Unlabelled clickable Home tab before selected Transactions tab"
+  android:
+    xpath: "//android.view.View[@content-desc='Transactions' and @clickable='true']/preceding-sibling::android.view.View[@clickable='true'][1]"
+  ios:
+    xpath: "//XCUIElementTypeButton[@name='Transactions']/preceding-sibling::XCUIElementTypeButton[1]"

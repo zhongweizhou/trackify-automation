@@ -11,6 +11,8 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from utils.system_dialogs import allow_notification_permission_if_present
+
 Locator = tuple[str, str]
 
 DEFAULT_TIMEOUT = 10
@@ -50,8 +52,14 @@ class BasePage(ABC):
         """
         by_locator = self._to_appium_locator(locator)
         wait_timeout = timeout if timeout is not None else self._timeout
+        visibility_check = EC.visibility_of_element_located(by_locator)
+
+        def visible_after_system_dialogs(driver: object) -> WebElement | bool:
+            allow_notification_permission_if_present(driver)
+            return visibility_check(driver)
+
         return WebDriverWait(self._driver, wait_timeout).until(
-            EC.visibility_of_element_located(by_locator)
+            visible_after_system_dialogs
         )
 
     def click(self, locator: Locator, timeout: int | None = None) -> None:

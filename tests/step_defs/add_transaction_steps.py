@@ -234,3 +234,44 @@ def transaction_category_is_not_missing(
         category: Expected custom category.
     """
     add_transaction_flow.assert_recent_transaction_category(category)
+
+
+@then(
+    "Transactions shows the saved transaction with matching date, amount, "
+    "category, and time"
+)
+def transactions_shows_saved_transaction(
+    add_transaction_flow: AddTransactionFlow,
+) -> None:
+    """Verify all required values in one Transactions list row.
+
+    Args:
+        add_transaction_flow: Add Transaction business flow fixture.
+    """
+    add_transaction_flow.assert_saved_transaction_details()
+
+
+@then("Transactions contains no transactions")
+def transactions_contains_no_transactions(
+    add_transaction_flow: AddTransactionFlow,
+) -> None:
+    """Verify that an invalid submission did not create a list row.
+
+    Args:
+        add_transaction_flow: Add Transaction business flow fixture.
+    """
+    add_transaction_flow.assert_transactions_empty()
+
+
+@then(parsers.parse('This Month summary is correct for budget "{budget}"'))
+def this_month_summary_is_correct(
+    add_transaction_flow: AddTransactionFlow,
+    budget: str,
+) -> None:
+    """Verify balance, income, expense, and rounded percentage.
+
+    Args:
+        add_transaction_flow: Add Transaction business flow fixture.
+        budget: Configured monthly budget from the Gherkin step.
+    """
+    add_transaction_flow.assert_monthly_summary(budget)
