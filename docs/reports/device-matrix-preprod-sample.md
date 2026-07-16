@@ -4,14 +4,27 @@
 
 This committed example was captured from an actual full-suite matrix run. It
 keeps the environment, device identity, operating-system version, case result,
-and duration visible to reviewers without requiring access to generated local
+and duration visible without requiring access to generated local
 artifacts.
+
+## Allure Report Preview / Allure 报告预览
+
+[![Allure report showing 14 passed tests across Android and iOS](../assets/allure-device-matrix-sample.png)](../assets/allure-device-matrix-sample.png)
+
+The Allure Suites view groups the same seven scenarios under the Android and
+iOS devices in `preprod`, for 14 passed device-case executions in total. Click
+the image to open it at full resolution.
+
+上图中的 Allure Suites 按 `preprod` 环境下的 Android 和 iOS 设备分组展示
+同一套 7 个场景，共 14 次设备维度用例执行且全部通过。点击图片可查看原始
+尺寸。
 
 ## English
 
 ### Run Summary
 
 - Environment: `preprod`
+- Distribution: `replicate` (the full suite ran on both devices)
 - Overall status: **PASSED**
 - Started: `2026-07-16 07:17:17 +08:00`
 - Completed: `2026-07-16 07:21:35 +08:00`
@@ -65,13 +78,14 @@ allure-results/             merged raw Allure results
 ```
 
 Generated artifacts are intentionally ignored by Git. This sanitized Markdown
-snapshot is committed as stable reviewer evidence.
+snapshot is committed as a stable report example.
 
 ## 中文
 
 ### 执行摘要
 
 - 测试环境：`preprod`
+- 分发模式：`replicate`（两台设备分别执行完整测试套件）
 - 总体结果：**通过**
 - 开始时间：`2026-07-16 07:17:17 +08:00`
 - 完成时间：`2026-07-16 07:21:35 +08:00`
