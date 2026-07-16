@@ -975,6 +975,13 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
   - Write `[AI Triage] <Category> (<NN%>): <reasoning>` through pytest's `terminalreporter.write_line()` when the failing phase completes, so capture settings do not hide it. Fall back to `print()` only when no terminal reporter exists.
   - Triage failures are caught and converted to `Unknown`; reporting code must never replace the original test failure.
 
+  **Operational presentation**:
+  - Passing tests produce no triage call or attachment. Only the first failing phase is classified.
+  - `classifier=local` proves a deterministic signature returned without network I/O; `classifier=llm` means one compatible-model call was attempted; `classifier=disabled` means ambiguous evidence could not use LLM because required opt-in configuration was absent.
+  - The terminal line is the fast signal; the Allure `AI Triage` JSON is the auditable record. Both remain advisory and must be read with the original traceback and screenshot.
+  - A real key belongs only in ignored `.env`; `.env.example` contains placeholders. The project never auto-loads `.env`, and certificate verification must not be disabled to make a gateway call succeed.
+  - Runtime configuration and verification procedures are documented in [`docs/AI_TRIAGE.md`](AI_TRIAGE.md).
+
   **Unit-test isolation**:
   - Add a `unit` marker. Refactor `reset_app_state` to request the `driver` lazily with `request.getfixturevalue("driver")`; immediately yield for `@pytest.mark.unit` tests so pure triage tests never start Appium or call `adb pm clear`.
   - Inject the LLM callable. A spy/fake MUST prove that a local `Locator` hit makes zero LLM calls; do not leave `print('local hit')` instrumentation in production code.

@@ -500,6 +500,11 @@ report/device-matrix/<环境>/<时间戳>/
 
 ## AI 失败归因
 
+Task 13 是真实回归测试失败后的诊断层。用例通过时不做任何处理；首个
+`setup`、`call` 或 `teardown` 阶段失败时，它保留原始失败和已有证据，给出
+建议分类及下一步排查动作。它用于缩短首次定位时间，最终根因仍由工程师根据
+traceback、截图和业务要求确认。
+
 pytest 的首个失败阶段（`setup`、`call` 或 `teardown`）会生成一次建议性质
 的归因结果。该结果不会改变 pytest 状态、隐藏原始 traceback、自动重试或
 自动提交缺陷。
@@ -512,6 +517,15 @@ pytest 的首个失败阶段（`setup`、`call` 或 `teardown`）会生成一次
 `Script` 和 `Data`。弱信号不会累加置信度，无法可靠判断时返回 `Unknown`。
 Allure 中会附加名为 `AI Triage` 的 JSON，包含 schema 版本、测试名称、失败
 阶段、分类、置信度、原因、建议动作、分类器和命中的本地签名 ID。
+
+| `classifier` | 用户应如何理解 |
+|---|---|
+| `local` | 高置信度本地签名完成分类，没有调用 API |
+| `llm` | 本地证据不足，已尝试一次配置好的兼容模型请求 |
+| `disabled` | 证据不足且开关、Key 或模型缺失，无法使用 LLM |
+
+终端会打印一条 `[AI Triage] ...`，失败用例的 Allure 详情同时附加结构化
+结果。必须结合原始 traceback 和截图阅读；它是排查假设，不是确认根因。
 
 Claude 兼容 fallback 默认关闭。只有主动配置开关、API Key 和模型时才会
 启用；`ANTHROPIC_BASE_URL` 可选，默认使用 Anthropic 官方地址。MiniMax
@@ -555,6 +569,9 @@ HTTP 错误或响应不合法时都安全降级为 `Unknown`。
 ```bash
 uv run pytest -m unit tests/unit/test_triage.py -q
 ```
+
+完整配置检查、local/LLM probe、pytest/Allure 实际验证步骤、问题排查和隐私
+边界见 [`docs/AI_TRIAGE.md`](docs/AI_TRIAGE.md)。
 
 ## Excel 管理的 BDD 同步
 

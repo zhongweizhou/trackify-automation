@@ -712,6 +712,12 @@ assumptions whenever they disagreed.
 
 ## AI Failure Triage
 
+Task 13 is a failure-time diagnostic layer for real regression runs. Passing
+cases do nothing. On the first failing `setup`, `call`, or `teardown` phase, it
+preserves the original failure, captures available evidence, assigns an
+advisory category, and suggests the next debugging action. This reduces initial
+triage time while keeping the engineer responsible for the root-cause decision.
+
 The first failed pytest phase (`setup`, `call`, or `teardown`) receives one
 advisory triage result. The verdict never changes the pytest outcome, hides the
 original traceback, retries a test, or files a bug automatically.
@@ -725,6 +731,16 @@ The always-on local stage uses deterministic signatures for `Locator`,
 `Unknown`; confidences are never added together. Results are attached to Allure
 as `AI Triage` JSON with the schema version, test, failing phase, category,
 confidence, reasoning, next action, classifier, and matched signature IDs.
+
+| `classifier` | User-visible meaning |
+|---|---|
+| `local` | A high-confidence local signature classified the failure; no API call occurred |
+| `llm` | Local evidence was ambiguous and one configured compatible-model call was attempted |
+| `disabled` | Ambiguous evidence could not use LLM because the switch, key, or model was missing |
+
+The terminal prints one `[AI Triage] ...` line, and the same structured result
+is attached to the failed Allure case. Always read it beside the original
+traceback and screenshot; it is a hypothesis, not a confirmed root cause.
 
 Claude-compatible fallback is disabled by default. Enable it only when the
 switch, API key, and model are intentionally configured. `ANTHROPIC_BASE_URL`
@@ -772,6 +788,10 @@ Run all Task 13 tests without Appium, a device, or network access:
 ```bash
 uv run pytest -m unit tests/unit/test_triage.py -q
 ```
+
+For configuration checks, local-vs-LLM probes, an actual pytest/Allure
+verification flow, troubleshooting, and privacy guarantees, see
+[`docs/AI_TRIAGE.md`](docs/AI_TRIAGE.md).
 
 ---
 

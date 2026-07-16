@@ -106,6 +106,27 @@ result. Screenshot errors emit a warning and never replace the original test
 failure. pytest-bdd hooks also expose the original Feature and Scenario names in
 Allure.
 
+## Advisory Failure Triage
+
+Task 13 consumes failure evidence only after pytest creates the original report.
+It classifies the first failed phase, prints one concise terminal hint, and
+attaches the same structured result to Allure. The dependency is one-way:
+
+```text
+pytest failure -> screenshot/traceback -> local signatures -> optional LLM
+               -> terminal + Allure advisory result
+```
+
+High-confidence local signatures handle deterministic environment, locator,
+data, app, and script failures without network I/O. Only ambiguous evidence may
+use the explicitly enabled MiniMax/Anthropic-compatible fallback. Reporting
+errors degrade to `Unknown`; they cannot mutate the test outcome or original
+evidence. This keeps failure intelligence useful without turning probabilistic
+advice into an automated repair mechanism.
+
+See [AI_TRIAGE.md](AI_TRIAGE.md) for runtime semantics, secure configuration,
+verification, and troubleshooting.
+
 ## CI Boundary
 
 The repository does not commit the Trackify APK. CI therefore has two explicit
