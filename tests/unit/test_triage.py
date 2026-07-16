@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import ssl
+import urllib.error
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +15,12 @@ from typing import Any
 import pytest
 
 import conftest as project_conftest
-from ai.triage import TriageResult, classify_local, triage_failure
+from ai.triage import (
+    TriageResult,
+    _anthropic_messages_url,
+    classify_local,
+    triage_failure,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -23,6 +31,7 @@ def clean_llm_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "AI_TRIAGE_LLM_ENABLED",
         "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
         "ANTHROPIC_MODEL",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -257,6 +266,81 @@ def test_anthropic_message_envelope_is_parsed(
     assert result.classifier == "llm"
 
 
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        (
+            "https://api.anthropic.com",
+            "https://api.anthropic.com/v1/messages",
+        ),
+        (
+            "https://api.minimaxi.com/anthropic/",
+            "https://api.minimaxi.com/anthropic/v1/messages",
+        ),
+        (
+            "https://api.minimaxi.com/anthropic/v1/messages",
+            "https://api.minimaxi.com/anthropic/v1/messages",
+        ),
+    ],
+)
+def test_anthropic_messages_url_preserves_gateway_path(
+    base_url: str,
+    expected: str,
+) -> None:
+    assert _anthropic_messages_url(base_url) == expected
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "file:///tmp/messages",
+        "https://key@example.test/anthropic",
+        "https://example.test/anthropic?token=secret",
+    ],
+)
+def test_anthropic_messages_url_rejects_unsafe_values(base_url: str) -> None:
+    with pytest.raises(ValueError, match="ANTHROPIC_BASE_URL"):
+        _anthropic_messages_url(base_url)
+
+
+def test_live_transport_uses_minimax_endpoint_and_x_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_llm(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.minimaxi.com/anthropic")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "MiniMax-M3")
+    captured: dict[str, Any] = {}
+
+    def fake_urlopen(
+        request: Any,
+        timeout: int,
+    ) -> io.BytesIO:
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = json.loads(request.data)
+        captured["timeout"] = timeout
+        response = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(_valid_llm_response(category="Data")),
+                }
+            ]
+        }
+        return io.BytesIO(json.dumps(response).encode("utf-8"))
+
+    monkeypatch.setattr("ai.triage.urllib.request.urlopen", fake_urlopen)
+
+    result = triage_failure({"error_msg": "AssertionError", "traceback": ""})
+
+    assert result.category == "Data"
+    assert result.classifier == "llm"
+    assert captured["url"] == "https://api.minimaxi.com/anthropic/v1/messages"
+    assert captured["headers"]["X-api-key"] == "test-key"
+    assert captured["body"]["model"] == "MiniMax-M3"
+    assert captured["timeout"] == 5
+
+
 def test_llm_timeout_returns_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable_llm(monkeypatch)
 
@@ -271,6 +355,51 @@ def test_llm_timeout_returns_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.category == "Unknown"
     assert result.confidence == 0.0
     assert result.classifier == "llm"
+    assert "timed out" in result.reasoning
+
+
+def test_http_error_reports_only_safe_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_llm(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.minimaxi.com/anthropic")
+
+    def unauthorized(*args: Any, **kwargs: Any) -> Any:
+        raise urllib.error.HTTPError(
+            "https://api.minimaxi.com/anthropic/v1/messages?secret=hidden",
+            401,
+            "secret response",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr("ai.triage.urllib.request.urlopen", unauthorized)
+
+    result = triage_failure({"error_msg": "AssertionError", "traceback": ""})
+
+    assert result.category == "Unknown"
+    assert result.classifier == "llm"
+    assert result.reasoning == "LLM fallback request failed with HTTP 401."
+    assert "hidden" not in result.reasoning
+    assert "secret response" not in result.reasoning
+
+
+def test_tls_error_is_distinct_from_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_llm(monkeypatch)
+
+    def untrusted_certificate(*args: Any, **kwargs: Any) -> Any:
+        certificate_error = ssl.SSLCertVerificationError(
+            "self-signed certificate in certificate chain"
+        )
+        raise urllib.error.URLError(certificate_error)
+
+    monkeypatch.setattr(
+        "ai.triage.urllib.request.urlopen",
+        untrusted_certificate,
+    )
+
+    result = triage_failure({"error_msg": "AssertionError", "traceback": ""})
+
+    assert result.classifier == "llm"
+    assert result.reasoning == "LLM fallback TLS certificate verification failed."
 
 
 @pytest.mark.parametrize(

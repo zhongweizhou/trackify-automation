@@ -85,6 +85,9 @@ reliable.
   `TRACKIFY_APK_URL` secret; without it, CI performs unit tests and collection.
 - Task 14 is intentionally one-way: Excel updates managed Scenario blocks, but
   results are not written back and locators are never self-healed.
+- Task 13 is advisory rather than autonomous. Its MiniMax-compatible fallback
+  was live-validated, but strict JSON failures still degrade to `Unknown`; a
+  larger real-failure sample is needed before changing thresholds or policy.
 - `summary.xlsx` generation was intentionally deferred from Task 11.
 
 ## AI Assistance
@@ -95,6 +98,12 @@ cycles. Each suggested interaction was checked against the live emulator. The
 most useful feedback came from actual failures: category navigation, keyboard
 state, date/time persistence, and post-save races all required evidence from the
 running app rather than accepting generated code at face value.
+
+The same boundary applies inside Task 13: deterministic signatures handle known
+failure shapes first, while MiniMax is used only for ambiguous evidence. Live
+integration verified authentication, TLS trust, request/response compatibility,
+and safe degradation, but model advice remains a hypothesis attached to the
+original failure rather than an automated verdict.
 
 ## Next Improvements
 

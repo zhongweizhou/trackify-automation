@@ -500,6 +500,11 @@ report/device-matrix/<环境>/<时间戳>/
 
 ## AI 失败归因
 
+Task 13 是真实回归测试失败后的诊断层。用例通过时不做任何处理；首个
+`setup`、`call` 或 `teardown` 阶段失败时，它保留原始失败和已有证据，给出
+建议分类及下一步排查动作。它用于缩短首次定位时间，最终根因仍由工程师根据
+traceback、截图和业务要求确认。
+
 pytest 的首个失败阶段（`setup`、`call` 或 `teardown`）会生成一次建议性质
 的归因结果。该结果不会改变 pytest 状态、隐藏原始 traceback、自动重试或
 自动提交缺陷。
@@ -513,13 +518,46 @@ pytest 的首个失败阶段（`setup`、`call` 或 `teardown`）会生成一次
 Allure 中会附加名为 `AI Triage` 的 JSON，包含 schema 版本、测试名称、失败
 阶段、分类、置信度、原因、建议动作、分类器和命中的本地签名 ID。
 
-Claude fallback 默认关闭。只有主动配置以下三个变量时才会启用：
+| `classifier` | 用户应如何理解 |
+|---|---|
+| `local` | 高置信度本地签名完成分类，没有调用 API |
+| `llm` | 本地证据不足，已尝试一次配置好的兼容模型请求 |
+| `disabled` | 证据不足且开关、Key 或模型缺失，无法使用 LLM |
+
+终端会打印一条 `[AI Triage] ...`，失败用例的 Allure 详情同时附加结构化
+结果。必须结合原始 traceback 和截图阅读；它是排查假设，不是确认根因。
+
+Claude 兼容 fallback 默认关闭。只有主动配置开关、API Key 和模型时才会
+启用；`ANTHROPIC_BASE_URL` 可选，默认使用 Anthropic 官方地址。MiniMax
+Anthropic 兼容接口配置如下：
 
 ```bash
 export AI_TRIAGE_LLM_ENABLED=1
+export ANTHROPIC_BASE_URL="https://api.minimaxi.com/anthropic"
 export ANTHROPIC_API_KEY="<key>"
-export ANTHROPIC_MODEL="<model>"
+export ANTHROPIC_MODEL="MiniMax-M3"
 ```
+
+引擎会保留网关路径并自动追加 `/v1/messages`。可以复制 `.env.example`，但
+项目不会自动加载 `.env`，需要执行 `set -a; source .env; set +a`；`.env` 已
+被忽略，严禁提交真实密钥。真实联调应使用裸 `AssertionError`，因为高置信度
+本地签名会按设计直接返回，不会访问 LLM。
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# 编辑 .env：开启 fallback，并替换占位 Key。
+set -a; source .env; set +a
+
+.venv/bin/python -c "from dataclasses import asdict; from ai.triage import triage_failure; print(asdict(triage_failure({'error_msg': 'AssertionError', 'traceback': '', 'test_name': 'live_probe', 'phase': 'call'})))"
+```
+
+真实请求成功时会返回 `classifier: llm` 和模型生成的原因/建议；认证、额度、
+连接、超时或响应格式问题只输出安全的 HTTP 状态/错误类型，不会输出 Key 或
+接口响应正文。
+如果 python.org 的 macOS Python 提示 `TLS certificate verification failed`，
+并且 `/etc/ssl/cert.pem` 存在，应设置
+`export SSL_CERT_FILE=/etc/ssl/cert.pem`，不要关闭证书校验。
 
 只有本地置信度低于 `0.70` 时才允许一次请求，不重试，总超时 5 秒。错误文本
 在网络调用前会被截断和脱敏，Authorization、Token、API Key 和 URL query
@@ -531,6 +569,9 @@ HTTP 错误或响应不合法时都安全降级为 `Unknown`。
 ```bash
 uv run pytest -m unit tests/unit/test_triage.py -q
 ```
+
+完整配置检查、local/LLM probe、pytest/Allure 实际验证步骤、问题排查和隐私
+边界见 [`docs/AI_TRIAGE.md`](docs/AI_TRIAGE.md)。
 
 ## Excel 管理的 BDD 同步
 
@@ -808,3 +849,24 @@ iOS 26.5：   7 passed / 0 failed
 - [功能探索记录](docs/Feature_Inventory.md)
 - [扩展路线](docs/SCALING.md)
 - [项目复盘](docs/REFLECTION.md)
+
+---
+
+## 支持这个项目
+
+如果这个开源项目帮你少踩了一些坑，或者节省了环境搭建与问题排查时间，欢迎
+自愿请我喝一杯 **10 元的蜜雪冰城**。打赏完全自愿，不影响项目使用、问题
+响应或功能优先级。Star、Issue 和 Pull Request 也都是对项目很有价值的支持。
+
+<table>
+  <tr>
+    <td align="center">
+      <strong>支付宝</strong><br><br>
+      <img src="docs/assets/donate/alipay.png" alt="支付宝打赏二维码" width="260">
+    </td>
+    <td align="center">
+      <strong>微信支付</strong><br><br>
+      <img src="docs/assets/donate/wechat-pay.png" alt="微信支付打赏二维码" width="260">
+    </td>
+  </tr>
+</table>

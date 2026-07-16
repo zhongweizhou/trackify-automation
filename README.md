@@ -712,6 +712,12 @@ assumptions whenever they disagreed.
 
 ## AI Failure Triage
 
+Task 13 is a failure-time diagnostic layer for real regression runs. Passing
+cases do nothing. On the first failing `setup`, `call`, or `teardown` phase, it
+preserves the original failure, captures available evidence, assigns an
+advisory category, and suggests the next debugging action. This reduces initial
+triage time while keeping the engineer responsible for the root-cause decision.
+
 The first failed pytest phase (`setup`, `call`, or `teardown`) receives one
 advisory triage result. The verdict never changes the pytest outcome, hides the
 original traceback, retries a test, or files a bug automatically.
@@ -726,14 +732,49 @@ The always-on local stage uses deterministic signatures for `Locator`,
 as `AI Triage` JSON with the schema version, test, failing phase, category,
 confidence, reasoning, next action, classifier, and matched signature IDs.
 
-Claude fallback is disabled by default. Enable it only when all three variables
-are intentionally configured:
+| `classifier` | User-visible meaning |
+|---|---|
+| `local` | A high-confidence local signature classified the failure; no API call occurred |
+| `llm` | Local evidence was ambiguous and one configured compatible-model call was attempted |
+| `disabled` | Ambiguous evidence could not use LLM because the switch, key, or model was missing |
+
+The terminal prints one `[AI Triage] ...` line, and the same structured result
+is attached to the failed Allure case. Always read it beside the original
+traceback and screenshot; it is a hypothesis, not a confirmed root cause.
+
+Claude-compatible fallback is disabled by default. Enable it only when the
+switch, API key, and model are intentionally configured. `ANTHROPIC_BASE_URL`
+is optional and defaults to the official Anthropic endpoint. For the MiniMax
+Anthropic-compatible API:
 
 ```bash
 export AI_TRIAGE_LLM_ENABLED=1
+export ANTHROPIC_BASE_URL="https://api.minimaxi.com/anthropic"
 export ANTHROPIC_API_KEY="<key>"
-export ANTHROPIC_MODEL="<model>"
+export ANTHROPIC_MODEL="MiniMax-M3"
 ```
+
+The engine appends `/v1/messages` without discarding a gateway path. Copying
+`.env.example` is optional; this project does not auto-load `.env`, so source it
+explicitly with `set -a; source .env; set +a`. `.env` is ignored and must never
+be committed. Use a bare `AssertionError` for a live probe because strong local
+signatures intentionally return before the network fallback.
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# Edit .env: enable the fallback and replace the placeholder key.
+set -a; source .env; set +a
+
+.venv/bin/python -c "from dataclasses import asdict; from ai.triage import triage_failure; print(asdict(triage_failure({'error_msg': 'AssertionError', 'traceback': '', 'test_name': 'live_probe', 'phase': 'call'})))"
+```
+
+A successful live call reports `classifier: llm` with a non-placeholder
+reasoning/action. A safe `HTTP 401`, `429`, connection, timeout, or invalid
+response diagnosis is returned without exposing the endpoint response or key.
+If a python.org macOS build reports `TLS certificate verification failed` and
+`/etc/ssl/cert.pem` exists, export `SSL_CERT_FILE=/etc/ssl/cert.pem`; do not
+disable certificate verification.
 
 The fallback is attempted only below `0.70` local confidence. It uses one
 standard-library HTTP request, no retry, and a five-second timeout. Failure text
@@ -747,6 +788,10 @@ Run all Task 13 tests without Appium, a device, or network access:
 ```bash
 uv run pytest -m unit tests/unit/test_triage.py -q
 ```
+
+For configuration checks, local-vs-LLM probes, an actual pytest/Allure
+verification flow, troubleshooting, and privacy guarantees, see
+[`docs/AI_TRIAGE.md`](docs/AI_TRIAGE.md).
 
 ---
 
@@ -1037,3 +1082,26 @@ The workflow at `.github/workflows/ci.yml` has two levels:
 ## Honest Reflection
 
 See [`docs/REFLECTION.md`](docs/REFLECTION.md) for what I did well, what I'd do differently, and what I'd improve with more time.
+
+---
+
+## Support This Project
+
+If this open-source project saved you some setup or debugging time and you would
+like to support its continued maintenance, you are welcome to buy me a **CNY 10
+Mixue drink**. Support is entirely optional and does not affect project usage,
+issue responses, or roadmap priorities. A Star, Issue, or Pull Request is also
+greatly appreciated.
+
+<table>
+  <tr>
+    <td align="center">
+      <strong>Alipay</strong><br><br>
+      <img src="docs/assets/donate/alipay.png" alt="Alipay support QR code" width="260">
+    </td>
+    <td align="center">
+      <strong>WeChat Pay</strong><br><br>
+      <img src="docs/assets/donate/wechat-pay.png" alt="WeChat Pay support QR code" width="260">
+    </td>
+  </tr>
+</table>

@@ -940,7 +940,7 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
   **Architecture (2 stages)**:
 
   1. **Local weighted heuristic (always on)** — compile `LOCAL_SIGNATURES` once at module import, then match normalized `error_msg + traceback`. Each signature has its own confidence. Choose the highest-confidence match; ties use `Env > Locator > Data > App Bug > Script`. Return immediately only when confidence is `>= 0.70`. Do not add weak matches together: multiple generic strings must not manufacture high confidence. This stage performs no file, environment, or network I/O.
-  2. **Claude fallback (explicit opt-in)** — runs only when local confidence is below `0.70` **and** `AI_TRIAGE_LLM_ENABLED=1`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL` are all present. Use the Anthropic Messages API through the Python standard library (or an injected callable in tests); do not add an SDK dependency outside §1. One request maximum, no retry, 5-second total timeout. Any timeout, HTTP error, missing config, malformed JSON, unknown category, or invalid field returns `Unknown / 0.0` without raising.
+  2. **Claude-compatible fallback (explicit opt-in)** — runs only when local confidence is below `0.70` **and** `AI_TRIAGE_LLM_ENABLED=1`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL` are all present. `ANTHROPIC_BASE_URL` is optional and defaults to `https://api.anthropic.com`; gateway paths such as `https://api.minimaxi.com/anthropic` are preserved before appending `/v1/messages`. Use the Anthropic Messages protocol through the Python standard library (or an injected callable in tests); do not add an SDK dependency outside §1. One request maximum, no retry, 5-second total timeout. Any timeout, HTTP error, missing config, malformed JSON, unknown category, or invalid field returns `Unknown / 0.0` without raising.
 
   **Required local signatures** (`re.IGNORECASE`; `re.DOTALL` only for bounded contextual patterns):
 
@@ -974,6 +974,13 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
   - Attach `AI Triage` with `allure.attachment_type.JSON`, even for `Unknown`, when an Allure lifecycle is active.
   - Write `[AI Triage] <Category> (<NN%>): <reasoning>` through pytest's `terminalreporter.write_line()` when the failing phase completes, so capture settings do not hide it. Fall back to `print()` only when no terminal reporter exists.
   - Triage failures are caught and converted to `Unknown`; reporting code must never replace the original test failure.
+
+  **Operational presentation**:
+  - Passing tests produce no triage call or attachment. Only the first failing phase is classified.
+  - `classifier=local` proves a deterministic signature returned without network I/O; `classifier=llm` means one compatible-model call was attempted; `classifier=disabled` means ambiguous evidence could not use LLM because required opt-in configuration was absent.
+  - The terminal line is the fast signal; the Allure `AI Triage` JSON is the auditable record. Both remain advisory and must be read with the original traceback and screenshot.
+  - A real key belongs only in ignored `.env`; `.env.example` contains placeholders. The project never auto-loads `.env`, and certificate verification must not be disabled to make a gateway call succeed.
+  - Runtime configuration and verification procedures are documented in [`docs/AI_TRIAGE.md`](AI_TRIAGE.md).
 
   **Unit-test isolation**:
   - Add a `unit` marker. Refactor `reset_app_state` to request the `driver` lazily with `request.getfixturevalue("driver")`; immediately yield for `@pytest.mark.unit` tests so pure triage tests never start Appium or call `adb pm clear`.
