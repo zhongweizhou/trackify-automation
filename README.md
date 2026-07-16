@@ -42,6 +42,45 @@ step code, Pages, Flows, and locators remain code-owned.
 
 ---
 
+## Demo Videos
+
+### Smoke selection sharded across Android and iOS
+
+```bash
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod \
+  -- \
+  -m smoke
+```
+
+This demo shows pytest marker pass-through, automatic Android/iOS discovery,
+parallel execution, collision-free Appium sessions, and a merged Allure report.
+Because the command uses `split`, the selected smoke scenarios are distributed
+across the ready device pool and each scenario runs exactly once; use the
+default `replicate` mode when every device must run every selected scenario.
+
+[Watch the smoke matrix demo on Bilibili](https://www.bilibili.com/video/BV17QKG6mEWW)
+
+### Excel-driven changed-case health and intentional assertion failure
+
+```bash
+./scripts/run_changed_matrix.sh
+```
+
+The demo starts from one BDD Scenario, finds the same stable case ID in Excel,
+and changes the action amount while deliberately leaving the expected result
+unchanged. The health gate detects only that modified case, synchronizes its
+managed Feature block, replicates it across the discovered Android and iOS
+devices, and reports the failed case plus its assertion reason in Allure. The
+failure is intentional: it demonstrates that a data/expectation mismatch is
+observable, attributable to a case and device, and returned to the caller as an
+unhealthy result rather than being hidden or self-healed.
+
+[Watch the changed-case failure demo on Bilibili](https://www.bilibili.com/video/BV1EDKG6EELD)
+
+---
+
 ## Reproduction Guide
 
 Once Android/iOS tooling and simulators are available, the following path takes
