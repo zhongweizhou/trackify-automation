@@ -1082,3 +1082,26 @@ The workflow at `.github/workflows/ci.yml` has two levels:
 ## Honest Reflection
 
 See [`docs/REFLECTION.md`](docs/REFLECTION.md) for what I did well, what I'd do differently, and what I'd improve with more time.
+
+---
+
+## Support This Project
+
+If this open-source project saved you some setup or debugging time and you would
+like to support its continued maintenance, you are welcome to buy me a **CNY 10
+Mixue drink**. Support is entirely optional and does not affect project usage,
+issue responses, or roadmap priorities. A Star, Issue, or Pull Request is also
+greatly appreciated.
+
+<table>
+  <tr>
+    <td align="center">
+      <strong>Alipay</strong><br><br>
+      <img src="docs/assets/donate/alipay.png" alt="Alipay support QR code" width="260">
+    </td>
+    <td align="center">
+      <strong>WeChat Pay</strong><br><br>
+      <img src="docs/assets/donate/wechat-pay.png" alt="WeChat Pay support QR code" width="260">
+    </td>
+  </tr>
+</table>

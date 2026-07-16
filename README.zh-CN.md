@@ -849,3 +849,24 @@ iOS 26.5：   7 passed / 0 failed
 - [功能探索记录](docs/Feature_Inventory.md)
 - [扩展路线](docs/SCALING.md)
 - [项目复盘](docs/REFLECTION.md)
+
+---
+
+## 支持这个项目
+
+如果这个开源项目帮你少踩了一些坑，或者节省了环境搭建与问题排查时间，欢迎
+自愿请我喝一杯 **10 元的蜜雪冰城**。打赏完全自愿，不影响项目使用、问题
+响应或功能优先级。Star、Issue 和 Pull Request 也都是对项目很有价值的支持。
+
+<table>
+  <tr>
+    <td align="center">
+      <strong>支付宝</strong><br><br>
+      <img src="docs/assets/donate/alipay.png" alt="支付宝打赏二维码" width="260">
+    </td>
+    <td align="center">
+      <strong>微信支付</strong><br><br>
+      <img src="docs/assets/donate/wechat-pay.png" alt="微信支付打赏二维码" width="260">
+    </td>
+  </tr>
+</table>
