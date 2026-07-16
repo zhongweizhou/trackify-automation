@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import ssl
 import urllib.error
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -379,6 +380,26 @@ def test_http_error_reports_only_safe_status(monkeypatch: pytest.MonkeyPatch) ->
     assert result.reasoning == "LLM fallback request failed with HTTP 401."
     assert "hidden" not in result.reasoning
     assert "secret response" not in result.reasoning
+
+
+def test_tls_error_is_distinct_from_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_llm(monkeypatch)
+
+    def untrusted_certificate(*args: Any, **kwargs: Any) -> Any:
+        certificate_error = ssl.SSLCertVerificationError(
+            "self-signed certificate in certificate chain"
+        )
+        raise urllib.error.URLError(certificate_error)
+
+    monkeypatch.setattr(
+        "ai.triage.urllib.request.urlopen",
+        untrusted_certificate,
+    )
+
+    result = triage_failure({"error_msg": "AssertionError", "traceback": ""})
+
+    assert result.classifier == "llm"
+    assert result.reasoning == "LLM fallback TLS certificate verification failed."
 
 
 @pytest.mark.parametrize(

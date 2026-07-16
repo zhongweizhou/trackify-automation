@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import ssl
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -414,6 +415,11 @@ def _llm_failure_reason(error: Exception) -> str:
     """Return bounded diagnostics without response bodies, URLs, or secrets."""
     if isinstance(error, urllib.error.HTTPError):
         return f"LLM fallback request failed with HTTP {error.code}."
+    if isinstance(error, urllib.error.URLError) and isinstance(
+        error.reason,
+        ssl.SSLCertVerificationError,
+    ):
+        return "LLM fallback TLS certificate verification failed."
     if isinstance(error, (TimeoutError, urllib.error.URLError)):
         return "LLM fallback request timed out or could not connect."
     if isinstance(error, (ValueError, json.JSONDecodeError)):

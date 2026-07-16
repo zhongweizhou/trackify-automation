@@ -541,6 +541,9 @@ set -a; source .env; set +a
 真实请求成功时会返回 `classifier: llm` 和模型生成的原因/建议；认证、额度、
 连接、超时或响应格式问题只输出安全的 HTTP 状态/错误类型，不会输出 Key 或
 接口响应正文。
+如果 python.org 的 macOS Python 提示 `TLS certificate verification failed`，
+并且 `/etc/ssl/cert.pem` 存在，应设置
+`export SSL_CERT_FILE=/etc/ssl/cert.pem`，不要关闭证书校验。
 
 只有本地置信度低于 `0.70` 时才允许一次请求，不重试，总超时 5 秒。错误文本
 在网络调用前会被截断和脱敏，Authorization、Token、API Key 和 URL query

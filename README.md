@@ -756,6 +756,9 @@ set -a; source .env; set +a
 A successful live call reports `classifier: llm` with a non-placeholder
 reasoning/action. A safe `HTTP 401`, `429`, connection, timeout, or invalid
 response diagnosis is returned without exposing the endpoint response or key.
+If a python.org macOS build reports `TLS certificate verification failed` and
+`/etc/ssl/cert.pem` exists, export `SSL_CERT_FILE=/etc/ssl/cert.pem`; do not
+disable certificate verification.
 
 The fallback is attempted only below `0.70` local confidence. It uses one
 standard-library HTTP request, no retry, and a five-second timeout. Failure text
