@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -826,6 +827,51 @@ def changed_nodeids(rows: Sequence[RegistryRow]) -> tuple[str, ...]:
     )
 
 
+def changed_plan_payload(
+    plan: SyncPlan,
+    workbook_path: Path,
+) -> dict[str, Any]:
+    """Return a stable machine-readable view of pending scenario changes."""
+    runnable_by_id = {
+        row.scenario_id: nodeid
+        for row, nodeid in zip(
+            plan.changed_active_rows,
+            changed_nodeids(plan.changed_active_rows),
+            strict=True,
+        )
+    }
+    changes = [
+        {
+            "test_case_id": change.row.scenario_id,
+            "kind": change.kind,
+            "module": change.row.module,
+            "title": change.row.title,
+            "status": change.row.status,
+            "nodeid": runnable_by_id.get(change.row.scenario_id),
+        }
+        for change in plan.changes
+    ]
+    return {
+        "schema_version": 1,
+        "workbook": str(workbook_path),
+        "workbook_sha256": file_sha256(workbook_path),
+        "has_drift": plan.has_drift,
+        "changes": changes,
+        "runnable": [change for change in changes if change["nodeid"] is not None],
+    }
+
+
+def list_changed_plan(input_path: Path, root: Path = ROOT) -> int:
+    """Print only pending-change JSON while proving the workbook is read-only."""
+    before_hash = file_sha256(input_path)
+    plan = build_plan(input_path, root)
+    payload = changed_plan_payload(plan, input_path)
+    if file_sha256(input_path) != before_hash:
+        raise SyncError("workbook changed while listing pending cases")
+    print(json.dumps(payload, sort_keys=True, ensure_ascii=True))
+    return 0
+
+
 def run_changed_cases(rows: Sequence[RegistryRow], root: Path = ROOT) -> int:
     """Run only active changed scenarios and print actionable feedback."""
     nodeids = changed_nodeids(rows)
@@ -949,6 +995,11 @@ def build_parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="Validate and report drift")
     mode.add_argument("--apply", action="store_true", help="Apply validated drift")
+    mode.add_argument(
+        "--list-changed",
+        action="store_true",
+        help="Print pending changes as JSON without writing",
+    )
     parser.add_argument("--watch", action="store_true", help="Watch the input workbook")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument(
@@ -964,8 +1015,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.run_changed and not args.apply:
         print("[sync] ERROR: --run-changed requires --apply", file=sys.stderr)
         return 2
+    if args.list_changed and args.watch:
+        print("[sync] ERROR: --list-changed cannot be used with --watch", file=sys.stderr)
+        return 2
     input_path = args.input.expanduser().resolve()
     try:
+        if args.list_changed:
+            return list_changed_plan(input_path)
         if args.watch:
             return watch_registry(input_path, args.apply, args.run_changed)
         return execute_once(input_path, args.apply, args.run_changed)

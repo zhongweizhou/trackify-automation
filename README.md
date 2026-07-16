@@ -257,6 +257,7 @@ test suite. Detailed examples follow it.
 | Check Excel drift | `uv run python scripts/sync_engine.py --check` | Validate the registry and report scenario-level drift without writing |
 | Apply Excel drift | `uv run python scripts/sync_engine.py --apply` | Atomically update managed Feature blocks and collect pytest |
 | Apply + run changes | `uv run python scripts/sync_engine.py --apply --run-changed` | Update, then execute only added/modified active scenarios |
+| Changed cases on all devices | `./scripts/run_changed_matrix.sh` | Check, sync, then run every added/modified case concurrently on every discovered Android and iOS device |
 | Default single device | `uv run pytest -m "not unit"` | Run all 7 scenarios on the default Android target |
 | Explicit Android device | `PLATFORM=android DEVICE_UDID=<udid> APP_PATH="$PWD/app/app-release.apk" uv run pytest -m "not unit"` | Run all scenarios on one Android emulator or physical device |
 | Explicit iOS simulator | `PLATFORM=ios DEVICE_UDID=<udid> APP_PATH="$PWD/app/Runner.app" uv run pytest -m "not unit"` | Run all scenarios on one booted iOS simulator |
@@ -598,6 +599,7 @@ trackify-automation/
 │   ├── test_cases.xlsx              # Working BDD registry/source of truth
 │   └── test_cases_template.xlsx     # Reusable corrected seven-case baseline
 ├── scripts/
+│   ├── run_changed_matrix.sh       # Check + sync + changed-case all-device health
 │   ├── run_device_matrix.py        # Concurrent Android + iOS runner
 │   └── sync_engine.py              # Incremental Excel-to-Gherkin sync
 ├── report/                         # Generated screenshots (ignored)
@@ -727,9 +729,45 @@ uv run python scripts/sync_engine.py --apply
 # Apply and execute only added/modified active scenarios
 uv run python scripts/sync_engine.py --apply --run-changed
 
+# One command: check, sync, and run every change on every Android/iOS device
+./scripts/run_changed_matrix.sh
+
 # Local five-second-debounced watch mode
 uv run python scripts/sync_engine.py --watch --apply
 ```
+
+`run_changed_matrix.sh` is the recommended cross-device health gate. It reads a
+machine-readable change manifest, discovers devices and checks Appium before
+mutation, applies the validated Feature transaction, then uses matrix
+`replicate` mode so every added/modified active case runs on every selected
+device. Examples:
+
+```bash
+# Default: preprod, every discovered Android + iOS device
+./scripts/run_changed_matrix.sh
+
+# Every ready Android target only
+./scripts/run_changed_matrix.sh --platform android
+
+# Two selected targets; repeat --device for each UDID
+./scripts/run_changed_matrix.sh \
+  --device <android-udid> \
+  --device <ios-udid>
+
+# Physical iOS targets require a signed package
+./scripts/run_changed_matrix.sh \
+  --platform ios \
+  --ios-real-app "$PWD/app/Trackify-preprod.ipa"
+```
+
+Exit `0` means no pending runnable change or all changed cases passed on every
+selected device. Exit `1` means at least one changed case failed on at least one
+device. Exit `2` means the pipeline could not complete because of validation,
+collection, device, Appium, app, lock, or I/O failure. Reports are written below
+`report/changed-device-matrix/<environment>/<timestamp>/`; `summary.md` contains
+a Changed Case Health table keyed by test case ID and device, `summary.json`
+contains the same machine-readable selection and results, and the directory also
+contains per-device logs/JUnit/screenshots plus merged Allure evidence.
 
 The engine validates all rows and both features before its first write. It uses
 an allowlisted Module-to-file route, stable `scenario_id`, timestamped backups,

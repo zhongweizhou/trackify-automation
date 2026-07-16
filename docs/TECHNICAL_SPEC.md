@@ -1196,6 +1196,9 @@ uv run python scripts/sync_engine.py --apply
 # Apply, then execute only added/modified active scenarios
 uv run python scripts/sync_engine.py --apply --run-changed
 
+# Cross-device health gate: check, apply, then replicate changes to all devices
+./scripts/run_changed_matrix.sh
+
 # Local-only watcher; mutation still requires --apply
 uv run python scripts/sync_engine.py --watch --apply
 
@@ -1203,7 +1206,7 @@ uv run python scripts/sync_engine.py --watch --apply
 uv run python scripts/sync_engine.py --check --input /path/to/test_cases.xlsx
 ```
 
-`--check` is the default when neither `--check` nor `--apply` is supplied. `--check` and `--apply` are mutually exclusive. `--run-changed` requires `--apply`; it runs the exact pytest node IDs for added/modified active scenarios after a successful collection. `--watch` without `--apply` reports drift only. Diff categories are `added`, `modified`, `deprecated`, `unchanged`, and `errors`; there is no implicit `deleted` category.
+`--check` is the default when neither `--check` nor `--apply` is supplied. `--check`, `--apply`, and machine-readable `--list-changed` are mutually exclusive. `--run-changed` requires `--apply`; it runs the exact pytest node IDs for added/modified active scenarios after a successful collection. `scripts/run_changed_matrix.sh` consumes `--list-changed`, preflights devices/Appium, applies once, and runs the exact changed subset in matrix `replicate` mode so every selected device validates every changed case. `--watch` without `--apply` reports drift only. Diff categories are `added`, `modified`, `deprecated`, `unchanged`, and `errors`; there is no implicit `deleted` category.
 
 Exit codes:
 - `0`: valid and no drift (`--check`), or apply succeeded and post-write collection passed.
@@ -1240,7 +1243,7 @@ The engine never edits either workbook. `data/.backup/` remains gitignored. Watc
 
 ### 11.6 Tests and Acceptance Criteria
 
-**Files touched**: `scripts/sync_engine.py`, `data/test_cases.xlsx`, `data/test_cases_template.xlsx`, both feature files (initial IDs/metadata), `tests/unit/test_sync_engine.py`, `.github/workflows/ci.yml`, plus `conftest.py` / `pytest.ini` only if the `unit` isolation marker from Task 13 is not already present.
+**Files touched**: `scripts/sync_engine.py`, `scripts/run_changed_matrix.sh`, `scripts/run_device_matrix.py`, `data/test_cases.xlsx`, `data/test_cases_template.xlsx`, both feature files (initial IDs/metadata), `tests/unit/test_sync_engine.py`, `unit_tests/test_run_device_matrix.py`, and `.github/workflows/ci.yml`, plus `conftest.py` / `pytest.ini` only if the `unit` isolation marker from Task 13 is not already present.
 
 All sync tests use temporary workbook/feature copies. They MUST NOT mutate repository feature files or the checked-in registry.
 
@@ -1256,6 +1259,7 @@ Acceptance criteria:
 - SHA-256 assertions prove untouched managed blocks are byte-identical after neighboring add/modify/deprecate operations.
 - Workbook hash is identical before and after every mode, including `--apply` and `--watch`.
 - `--apply --run-changed` executes only added/modified active scenarios, reports their IDs and Allure path, and prints an exact retry command plus code/locator debugging scope on runtime failure.
+- `scripts/run_changed_matrix.sh` returns `0` only when there is no runnable drift or every changed case passes on every selected device; matrix summaries preserve change kind, stable case ID, environment, device, OS, UDID, and per-device health.
 - CI `validate` runs `uv run python scripts/sync_engine.py --check` before pytest collection once Task 14 lands.
 - Full verification passes: unit sync tests, seven BDD scenarios collected, and `git diff --check` clean.
 
