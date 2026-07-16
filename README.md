@@ -1,10 +1,165 @@
 # Trackify Mobile UI Automation
 
+<p align="center">
+  <strong>English</strong> | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 > AI-assisted End-to-End mobile automation for **Trackify** (Flutter personal-finance tracker).
 >
 > Built as part of the Trackify Challenge.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue)](https://www.python.org/) [![Appium](https://img.shields.io/badge/Appium-3.x-green)](https://appium.io/) [![pytest-bdd](https://img.shields.io/badge/pytest--bdd-BDD-orange)](https://pytest-bdd.readthedocs.io/) [![Allure](https://img.shields.io/badge/Allure-Reporting-yellow)](https://allurereport.org/)
+
+---
+
+## Interviewer Quick View
+
+This repository demonstrates more than a set of UI scripts: it treats mobile
+automation as a small test platform with explicit architecture, deterministic
+state, cross-platform execution, and attributable reports.
+
+**Start here**: [sample Android + iOS matrix report](docs/reports/device-matrix-preprod-sample.md)
+| [technical specification](docs/TECHNICAL_SPEC.md) |
+[architecture decisions](docs/DESIGN.md) |
+[honest reflection](docs/REFLECTION.md)
+
+| Engineering highlight | Evidence in this repository |
+|---|---|
+| Contract-driven BDD | Seven versioned scenarios, a controlled Gherkin vocabulary, reusable steps, and strict pytest markers |
+| Layered architecture | Gherkin → Step Definitions → Flow → Page Object → Appium Driver; each layer has a clear ownership boundary |
+| Cross-platform locator strategy | Platform-specific YAML locators with `accessibility_id` first and bounded fallback strategies for Flutter semantics |
+| Deterministic isolation | App state is reset before every scenario, then the same required onboarding baseline is completed |
+| Multi-device concurrency | One command discovers all ready Android and iOS targets and runs one isolated pytest worker per device |
+| Collision-free Appium sessions | Unique Android `systemPort`, iOS WDA/MJPEG ports, and WDA derived-data paths per device |
+| Traceable reporting | Environment, platform, device, OS version, UDID, per-case result, JUnit, logs, screenshots, and merged Allure results |
+| Reviewable engineering process | The technical specification defines layer rules, acceptance criteria, anti-patterns, and task-sized commits |
+
+The optional AI failure triage and Excel-to-Gherkin synchronization described
+in the technical specification are extension contracts, not claims about the
+currently shipped runtime.
+
+---
+
+## Reviewer Reproduction Guide
+
+Once Android/iOS tooling and simulators are available, the following path takes
+a reviewer from clone to a report without needing to understand the framework
+internals first.
+
+### 1. Clone and install dependencies
+
+```bash
+git clone https://github.com/zhongweizhou/trackify-automation.git
+cd trackify-automation
+
+# Install uv first when it is not already available on macOS
+brew install uv
+uv sync
+npm install -g appium allure-commandline
+appium driver install uiautomator2
+appium driver install xcuitest
+```
+
+### 2. Provide the app builds
+
+App binaries are intentionally excluded from Git. Place the builds at these
+default paths:
+
+| Target | Required build | Default path |
+|---|---|---|
+| Android emulator/device | APK | `app/app-release.apk` |
+| iOS Simulator | Simulator `.app` bundle | `app/Runner.app` |
+| Physical iOS device | Signed device `.ipa` or `.app` | Any path passed with `--ios-real-app` |
+
+```bash
+mkdir -p app
+cp /path/to/app-release.apk app/app-release.apk
+cp -R /path/to/Runner.app app/Runner.app
+```
+
+An iOS Simulator cannot install a device-only build. `Runner.app` must be built
+for the Simulator architecture.
+
+### 3. Boot and verify targets
+
+Start the desired emulators/simulators before running the commands below.
+
+```bash
+# Ready Android targets must show the state "device"
+adb devices -l
+
+# Ready iOS Simulators must show the state "Booted"
+xcrun simctl list devices booted
+```
+
+### 4. Start Appium in a dedicated terminal
+
+The Android SDK variables must be set in the same terminal that starts Appium.
+Leave this process running.
+
+```bash
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+appium
+```
+
+### 5. Preview what will run
+
+In a second terminal, from the repository root:
+
+```bash
+.venv/bin/python scripts/run_device_matrix.py --list
+```
+
+Confirm that every intended device, OS version, and UDID appears in the list.
+This command does not install the app or execute tests.
+
+### 6. Execute and open the report
+
+```bash
+# All 7 scenarios on every discovered Android and iOS target
+.venv/bin/python scripts/run_device_matrix.py --env preprod
+```
+
+The runner prints the exact summary and Allure paths when it finishes:
+
+```text
+[matrix] Summary: .../report/device-matrix/preprod/<timestamp>/summary.md
+[matrix] Allure:  .../report/device-matrix/preprod/<timestamp>/allure-report/index.html
+```
+
+Open `summary.md` directly on GitHub or in an editor. Open the generated HTML
+report on macOS with:
+
+```bash
+open "$(find report/device-matrix/preprod -path '*/allure-report/index.html' -print | sort | tail -1)"
+```
+
+For a platform-limited setup, use one of these commands instead:
+
+```bash
+# Every connected Android target
+.venv/bin/python scripts/run_device_matrix.py --platform android --env preprod
+
+# Every booted/paired iOS target
+.venv/bin/python scripts/run_device_matrix.py --platform ios --env preprod
+```
+
+Expected evidence includes a device-level summary, individual case results,
+per-device pytest/JUnit artifacts, a merged Allure report, and screenshots for
+call-stage failures. Compare the output with the committed
+[sample report](docs/reports/device-matrix-preprod-sample.md).
+
+### Common setup failures
+
+| Symptom | Check |
+|---|---|
+| No devices discovered | Run `adb devices -l` and `xcrun simctl list devices booted`; boot or reconnect the target |
+| Appium connection refused | Confirm the dedicated `appium` terminal is still running on port `4723` |
+| Android SDK not found | Export `ANDROID_HOME` and `ANDROID_SDK_ROOT` before starting Appium, then restart Appium |
+| Android/iOS app not found | Confirm `app/app-release.apk` and/or `app/Runner.app` exists from the repository root |
+| XCUITest driver missing | Run `appium driver install xcuitest` |
+| Physical iOS build requested | Pair/unlock the device, enable Developer Mode, and provide `--ios-real-app <signed-build>` |
 
 ---
 
@@ -71,6 +226,31 @@ Reader), so the full seven-scenario run takes several minutes.
 Commands below use `uv`. If the repository already has a `.venv` but `uv` is
 not installed, replace `uv run pytest` with
 `.venv/bin/python -m pytest`.
+
+#### Command index
+
+The table below is the complete command-oriented entry point for the current
+test suite. Detailed examples follow it.
+
+| Category | Command | Purpose |
+|---|---|---|
+| Validate collection | `uv run pytest --collect-only -q` | Parse imports, Gherkin, steps, and markers without opening an Appium session |
+| Default single device | `uv run pytest` | Run all 7 scenarios on the default Android target |
+| Explicit Android device | `PLATFORM=android DEVICE_UDID=<udid> APP_PATH="$PWD/app/app-release.apk" uv run pytest` | Run all scenarios on one Android emulator or physical device |
+| Explicit iOS simulator | `PLATFORM=ios DEVICE_UDID=<udid> APP_PATH="$PWD/app/Runner.app" uv run pytest` | Run all scenarios on one booted iOS simulator |
+| Feature | `uv run pytest tests/features/add_transaction.feature -q` | Run one feature file (5 Add Transaction scenarios) |
+| Marker | `uv run pytest -m smoke -q` | Run a priority or functional subset |
+| Scenario | `uv run pytest -k "add_expense_happy_path" -q` | Run one generated pytest scenario name |
+| All devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod` | Run all 7 scenarios concurrently on every discovered Android and iOS target |
+| Android matrix | `.venv/bin/python scripts/run_device_matrix.py --platform android --env preprod` | Run all connected Android targets concurrently |
+| iOS matrix | `.venv/bin/python scripts/run_device_matrix.py --platform ios --env preprod` | Run all booted iOS simulators and paired iOS devices concurrently |
+| Selected devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod --device <udid-1> --device <udid-2>` | Run only the listed devices; repeat `--device` as needed |
+| Matrix subset | `.venv/bin/python scripts/run_device_matrix.py --env preprod -- -m smoke` | Forward pytest arguments after `--` to every device worker |
+| Reported run | `uv run pytest --alluredir=./allure-results --clean-alluredir` | Produce Allure raw results for a single-device run |
+| Failure/debug | `uv run pytest -x -s -vv` | Stop on the first failure and show uncaptured diagnostic output |
+
+Use `.venv/bin/python -m pytest` instead of `uv run pytest` in any row when
+`uv` is unavailable. Start Appium before any command that executes UI tests.
 
 #### Full suite
 
@@ -204,6 +384,16 @@ per device and runs them concurrently. The test environment defaults to
 # Run all seven scenarios on every discovered Android and iOS device
 .venv/bin/python scripts/run_device_matrix.py --env preprod
 
+# Run every connected Android device only
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform android \
+  --env preprod
+
+# Run every booted/paired iOS device only
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform ios \
+  --env preprod
+
 # Run only smoke scenarios on the full matrix
 .venv/bin/python scripts/run_device_matrix.py --env preprod -- -m smoke
 
@@ -211,6 +401,12 @@ per device and runs them concurrently. The test environment defaults to
 .venv/bin/python scripts/run_device_matrix.py \
   --env preprod \
   --device emulator-5554
+
+# Run a selected Android + iOS pair (repeat --device for more targets)
+.venv/bin/python scripts/run_device_matrix.py \
+  --env preprod \
+  --device emulator-5554 \
+  --device BFE1DE67-0F95-47B7-A02A-D25EE83CD999
 
 # Include connected physical iOS devices using a signed device build
 .venv/bin/python scripts/run_device_matrix.py \
@@ -254,6 +450,9 @@ report/device-matrix/<environment>/<timestamp>/
 Every Allure test result includes the environment, platform, device name,
 operating-system version, and UDID. The matrix summary reports passed, failed,
 error, and skipped counts separately for each device.
+
+See the committed [preprod matrix report example](docs/reports/device-matrix-preprod-sample.md),
+captured from a real run of all seven scenarios on Android 17 and iOS 26.5.
 
 Physical iOS devices must be paired, unlocked, in Developer Mode, and visible
 to `xcrun devicectl list devices`. Because `mobile: clearApp` is simulator-only,
@@ -311,6 +510,7 @@ trackify-automation/
 │   ├── DESIGN.md                   # Architecture and tradeoffs
 │   ├── Feature_Inventory.md        # Manual feature exploration
 │   ├── REFLECTION.md               # Outcomes and limitations
+│   ├── reports/                    # Reviewable, committed report examples
 │   ├── SCALING.md                  # Long-term scaling roadmap
 │   └── TECHNICAL_SPEC.md           # Implementation contract
 ├── tests/
@@ -342,7 +542,9 @@ trackify-automation/
 ├── data/
 │   ├── test_data.yaml
 │   └── test_cases_template.xlsx
-├── scripts/sync_engine.py
+├── scripts/
+│   ├── run_device_matrix.py        # Concurrent Android + iOS runner
+│   └── sync_engine.py              # Excel sync extension scaffold
 ├── report/                         # Generated screenshots (ignored)
 ├── app/app-release.apk             # Local APK (ignored)
 ├── conftest.py                     # Driver, reset, Pages, Flows, reporting
@@ -417,6 +619,7 @@ After every run, see:
 
 - **Allure report**: `allure-report/index.html` (open in browser)
 - **Screenshots on failure**: `report/screenshots/`
+- **Committed reviewer example**: [preprod Android + iOS matrix report](docs/reports/device-matrix-preprod-sample.md)
 
 ### Latest Verified Run
 
@@ -430,7 +633,7 @@ Command: `uv run pytest --alluredir=./allure-results`
 
 ---
 
-## iOS Extension Plan
+## iOS Support
 
 > The full suite is device-validated on Android and on an iPhone 17 simulator
 > running iOS 26.5. Other iOS device sizes and locale settings may require
