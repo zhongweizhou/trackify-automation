@@ -28,7 +28,7 @@ Feature: Add Transaction
   @smoke @p0
   Scenario: Add income happy path
     When user taps "Add Income"
-    And user enters amount "5001"
+    And user enters amount "5002"
     And user selects category "Salary"
     And user enters tags "salary,work"
     And user taps Save
