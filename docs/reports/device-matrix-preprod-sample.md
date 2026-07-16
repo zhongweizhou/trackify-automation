@@ -7,6 +7,18 @@ keeps the environment, device identity, operating-system version, case result,
 and duration visible without requiring access to generated local
 artifacts.
 
+## Allure Report Preview / Allure 报告预览
+
+[![Allure report showing 14 passed tests across Android and iOS](../assets/allure-device-matrix-sample.png)](../assets/allure-device-matrix-sample.png)
+
+The Allure Suites view groups the same seven scenarios under the Android and
+iOS devices in `preprod`, for 14 passed device-case executions in total. Click
+the image to open it at full resolution.
+
+上图中的 Allure Suites 按 `preprod` 环境下的 Android 和 iOS 设备分组展示
+同一套 7 个场景，共 14 次设备维度用例执行且全部通过。点击图片可查看原始
+尺寸。
+
 ## English
 
 ### Run Summary
