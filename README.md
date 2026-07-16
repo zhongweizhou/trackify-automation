@@ -33,11 +33,12 @@ state, cross-platform execution, and attributable reports.
 | Collision-free Appium sessions | Unique Android `systemPort`, iOS WDA/MJPEG ports, and WDA derived-data paths per device |
 | Traceable reporting | Environment, platform, device, OS version, UDID, per-case result, JUnit, logs, screenshots, and merged Allure results |
 | Advisory failure triage | Deterministic local signatures classify the first failed phase; an explicitly enabled Claude fallback handles ambiguous failures |
+| Excel-managed living cases | A validated registry incrementally updates only managed Gherkin blocks, preserves unchanged bytes, and can run only changed scenarios |
 | Reviewable engineering process | The technical specification defines layer rules, acceptance criteria, anti-patterns, and task-sized commits |
 
-AI failure triage is implemented. The Excel-to-Gherkin synchronization described
-in the technical specification remains an extension contract, not a claim about
-the currently shipped runtime.
+AI failure triage and Excel-to-Gherkin synchronization are both implemented.
+The sync boundary deliberately stops at managed Scenario blocks: executable
+step code, Pages, Flows, and locators remain code-owned.
 
 ---
 
@@ -252,6 +253,10 @@ test suite. Detailed examples follow it.
 | Validate BDD collection | `uv run pytest -m "not unit" --collect-only -q` | Parse the 7 mobile scenarios without opening an Appium session |
 | Matrix unit tests | `.venv/bin/python -m unittest discover -s unit_tests -v` | Validate device sharding without Appium or a mobile device |
 | Triage unit tests | `uv run pytest -m unit tests/unit/test_triage.py -q` | Validate Task 13 without Appium, devices, or network calls |
+| Sync unit tests | `uv run pytest -m unit tests/unit/test_sync_engine.py -q` | Validate Task 14 routing, incremental writes, byte preservation, and rollback |
+| Check Excel drift | `uv run python scripts/sync_engine.py --check` | Validate the registry and report scenario-level drift without writing |
+| Apply Excel drift | `uv run python scripts/sync_engine.py --apply` | Atomically update managed Feature blocks and collect pytest |
+| Apply + run changes | `uv run python scripts/sync_engine.py --apply --run-changed` | Update, then execute only added/modified active scenarios |
 | Default single device | `uv run pytest -m "not unit"` | Run all 7 scenarios on the default Android target |
 | Explicit Android device | `PLATFORM=android DEVICE_UDID=<udid> APP_PATH="$PWD/app/app-release.apk" uv run pytest -m "not unit"` | Run all scenarios on one Android emulator or physical device |
 | Explicit iOS simulator | `PLATFORM=ios DEVICE_UDID=<udid> APP_PATH="$PWD/app/Runner.app" uv run pytest -m "not unit"` | Run all scenarios on one booted iOS simulator |
@@ -590,10 +595,11 @@ trackify-automation/
 │   └── system_dialogs.py           # Notification permission handling
 ├── data/
 │   ├── test_data.yaml
-│   └── test_cases_template.xlsx
+│   ├── test_cases.xlsx              # Working BDD registry/source of truth
+│   └── test_cases_template.xlsx     # Reusable corrected seven-case baseline
 ├── scripts/
 │   ├── run_device_matrix.py        # Concurrent Android + iOS runner
-│   └── sync_engine.py              # Excel sync extension scaffold
+│   └── sync_engine.py              # Incremental Excel-to-Gherkin sync
 ├── report/                         # Generated screenshots (ignored)
 ├── app/app-release.apk             # Local APK (ignored)
 ├── conftest.py                     # Driver, reset, Pages, Flows, reporting
@@ -703,6 +709,160 @@ uv run pytest -m unit tests/unit/test_triage.py -q
 
 ---
 
+## Excel-Managed BDD Sync
+
+[`data/test_cases.xlsx`](data/test_cases.xlsx) contains the current seven cases
+as a maintainable 16-column registry. Excel owns metadata plus the managed
+`Scenario` action/assertion blocks; Feature headers and `Background` remain
+code-owned. Step definitions, Page/Flow code, test data, and YAML locators are
+never generated or overwritten by the sync engine.
+
+```bash
+# Validate schema and show added/modified/deprecated/unchanged IDs; no writes
+uv run python scripts/sync_engine.py --check
+
+# Apply only validated scenario-level drift, then run pytest collection
+uv run python scripts/sync_engine.py --apply
+
+# Apply and execute only added/modified active scenarios
+uv run python scripts/sync_engine.py --apply --run-changed
+
+# Local five-second-debounced watch mode
+uv run python scripts/sync_engine.py --watch --apply
+```
+
+The engine validates all rows and both features before its first write. It uses
+an allowlisted Module-to-file route, stable `scenario_id`, timestamped backups,
+same-directory temporary files, `os.replace`, a concurrent-writer lock, and
+post-write pytest collection. Collection failure restores every changed Feature.
+Unchanged managed blocks are reused as exact source slices and remain
+byte-identical after neighboring additions, modifications, or deprecations.
+
+`--run-changed` is the targeted implementation/debug loop. Passing cases return
+a concise success message and Allure path. Runtime failures keep the valid
+Feature update, run through Task 13 and screenshot reporting, and print the exact
+pytest retry command plus a prompt to inspect step definitions, Page/Flow code,
+and YAML locators. The engine does not guess or self-heal locators; those changes
+require Appium evidence and code review. A collection failure, such as an
+unimplemented Gherkin phrase, rolls the Feature update back and reports the
+missing implementation.
+
+The workbook itself is always read-only to the engine, including `--apply` and
+watch mode. Missing rows never mean delete; use `Automation Status=deprecated`
+with an explicit deprecated version.
+
+### End-to-end operator verification
+
+Use this workflow to prove that one Excel change updates and runs only one
+scenario. Keep any real case changes; the restore commands at the end are only
+for a disposable exercise.
+
+1. Establish the committed baseline:
+
+   ```bash
+   git status --short
+   uv run python scripts/sync_engine.py --check
+   echo $?
+   ```
+
+   A clean baseline reports five unchanged `add_transaction` cases and two
+   unchanged `transactions` cases, then exits `0`.
+
+2. Open `data/test_cases.xlsx`, select the `Test Cases` sheet, and find
+   `TC_ADD_TX_001`. For a simple drill, change amount `100` to `101` in both
+   `Test Steps` and every matching amount assertion in `Expected Result`. Save
+   and close Excel so it stops writing temporary files.
+
+3. Preview the scenario-level change without writing Feature files:
+
+   ```bash
+   uv run python scripts/sync_engine.py --check
+   echo $?
+   git status --short
+   ```
+
+   The expected result is exactly one `modified: TC_ADD_TX_001`, no change in
+   the `transactions` module, and exit `1`. Exit `1` here means valid drift was
+   found; it is not a sync error.
+
+4. Choose one apply path. To validate generation without a device, run:
+
+   ```bash
+   uv run python scripts/sync_engine.py --apply
+   ```
+
+   To apply and immediately run the changed case on Android instead, run:
+
+   ```bash
+   PLATFORM=android \
+   DEVICE_UDID=<android-udid> \
+   APP_PATH="$PWD/app/app-release.apk" \
+   uv run python scripts/sync_engine.py --apply --run-changed
+   ```
+
+   Get the Android UDID with `adb devices`. For a booted iOS simulator, use:
+
+   ```bash
+   PLATFORM=ios \
+   DEVICE_UDID=<ios-simulator-udid> \
+   APP_PATH="$PWD/app/Runner.app" \
+   uv run python scripts/sync_engine.py --apply --run-changed
+   ```
+
+   Get the iOS UDID with `xcrun simctl list devices booted`. Do not run plain
+   `--apply` first if the goal is changed-case execution: after a successful
+   apply there is no remaining drift, so a later `--run-changed` has nothing to
+   select. Edit the workbook again if generation was already applied.
+
+5. Confirm the scope and final state:
+
+   ```bash
+   git diff -- tests/features/add_transaction.feature
+   git diff -- tests/features/transactions.feature
+   uv run python scripts/sync_engine.py --check
+   ```
+
+   Only the managed `TC_ADD_TX_001` block should differ. The final check exits
+   `0`. A successful device run names the case, exact pytest node ID, scenario
+   count, and `report/sync/<timestamp>/allure-results` directory.
+
+6. Inspect failure feedback when a changed mobile case fails. The valid Feature
+   update stays in place for debugging, while the console prints the exact retry
+   command and points to Task 13 triage, screenshots, Allure, step definitions,
+   Page/Flow code, and YAML locators. Locators are never changed automatically.
+
+7. Optionally verify collection rollback by changing the Scenario Title in
+   Excel without updating its Python `@scenario` binding, then running
+   `--apply`. Collection should fail with exit `2`, restore the Feature backup,
+   and remove the lock. The workbook remains changed, so `--check` will continue
+   to report drift until the title is corrected.
+
+8. Restore the committed baseline after a disposable drill:
+
+   ```bash
+   git restore data/test_cases.xlsx
+   uv run python scripts/sync_engine.py --apply
+   uv run python scripts/sync_engine.py --check
+   git status --short
+   ```
+
+   Do not use `git restore` for real case edits. In `git status --short`, `M`
+   means a tracked file changed and `??` means an untracked file. `uv.lock` may
+   be created by `uv`; it is a dependency lockfile, not sync-engine output, and
+   should be reviewed and committed separately from case changes.
+
+Command exit codes are `0` for no drift/success, `1` for check-mode drift or a
+changed-case runtime failure, and `2` for validation, collection, lock, or I/O
+errors.
+
+Run Task 14 tests without Appium or a device:
+
+```bash
+uv run pytest -m unit tests/unit/test_sync_engine.py -q
+```
+
+---
+
 ## Test Results
 
 After every run, see:
@@ -784,8 +944,8 @@ simulator profile, locale, or 12/24-hour time setting.
 The workflow at `.github/workflows/ci.yml` has two levels:
 
 - Every push to `test`, pull request, and manual dispatch installs dependencies,
-  runs device-free matrix distribution and failure-triage unit tests, and
-  collects all seven BDD scenarios.
+  runs device-free matrix, failure-triage, and sync unit tests; rejects Excel
+  registry drift; and collects all seven BDD scenarios.
 - Full Android E2E requires a repository secret named `TRACKIFY_APK_URL` that
   points to a downloadable APK. This is necessary because the app binary is not
   committed.

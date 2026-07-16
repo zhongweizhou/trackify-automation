@@ -7,6 +7,9 @@ Feature: Transactions List
     And user enables Bank SMS Reader and gets started
     And user is on the Home page
 
+# scenario_id: TC_TXN_001
+# introduced_in: 1.0.0
+# platforms: android, ios
   @p1 @filter
   Scenario: Filter transactions by type shows only matching type
     When user taps "Add Expense"
@@ -23,6 +26,9 @@ Feature: Transactions List
     And user filters transactions by type "expense"
     Then only transactions of type "expense" are shown
 
+# scenario_id: TC_TXN_002
+# introduced_in: 1.0.0
+# platforms: android, ios
   @p1 @grouping
   Scenario: Transactions grouped by date with section headers
     When user taps "Add Expense"

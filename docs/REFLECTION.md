@@ -83,6 +83,8 @@ reliable.
   seven-scenario scope.
 - GitHub-hosted E2E requires an externally downloadable APK through the
   `TRACKIFY_APK_URL` secret; without it, CI performs unit tests and collection.
+- Task 14 is intentionally one-way: Excel updates managed Scenario blocks, but
+  results are not written back and locators are never self-healed.
 - `summary.xlsx` generation was intentionally deferred from Task 11.
 
 ## AI Assistance
@@ -106,6 +108,8 @@ running app rather than accepting generated code at face value.
    first-install smoke path.
 5. Publish the APK through an authenticated build artifact service so mobile
    E2E can run on every trusted branch build.
+6. Replace the local Excel registry with a reviewed test-management API only
+   when multiple teams need concurrent editing, permissions, and audit history.
 
 The main lesson is that a small suite becomes valuable when its assertions
 follow data across screens. Seven scenarios with deterministic state and strong

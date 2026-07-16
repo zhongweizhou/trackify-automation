@@ -16,6 +16,7 @@ report/device-matrix/
 allure-results/
 allure-report/
 data/.backup/
+outputs/
 
 # IDE/editor
 .idea/

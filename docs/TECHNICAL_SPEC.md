@@ -1177,12 +1177,12 @@ Canonical deprecated form:
 
 **Bootstrap data reconciliation (mandatory before first apply)**:
 - Copy `data/test_cases_template.xlsx` to `data/test_cases.xlsx`; the working registry is the Task 14 input.
-- Update all seven rows to match §6.7 exactly before generating features. The current template is an early draft: it still contains `Coffee` instead of `baby cost`, old compound `user adds ...` phrases, missing tag/date actions, incomplete persistence/monthly-summary assertions, and `Platform=both` even though only Android is device-validated. Use `android` until iOS scenarios pass on a simulator.
+- Update all seven rows to match §6.7 exactly before generating features. The original template was an early draft: it contained `Coffee` instead of `baby cost`, old compound `user adds ...` phrases, missing tag/date actions, and incomplete persistence/monthly-summary assertions. The corrected baseline uses `Platform=both` because all seven scenarios have now passed on Android and iOS simulators.
 - Preserve the template as a reusable example, but update it to the same corrected seven-row baseline so a new copy does not reintroduce drift.
 
 ### 11.4 Sync Engine Interface (`scripts/sync_engine.py`)
 
-The existing script is a scaffold and does **not** satisfy this contract until Task 14 refactors it. In particular, rows must be routed by Module rather than compared/appended to every feature file.
+The implemented engine routes rows through the Module allowlist and updates only the corresponding managed feature blocks.
 
 Safe run modes:
 
@@ -1193,6 +1193,9 @@ uv run python scripts/sync_engine.py --check
 # Explicit mutation after full validation
 uv run python scripts/sync_engine.py --apply
 
+# Apply, then execute only added/modified active scenarios
+uv run python scripts/sync_engine.py --apply --run-changed
+
 # Local-only watcher; mutation still requires --apply
 uv run python scripts/sync_engine.py --watch --apply
 
@@ -1200,7 +1203,7 @@ uv run python scripts/sync_engine.py --watch --apply
 uv run python scripts/sync_engine.py --check --input /path/to/test_cases.xlsx
 ```
 
-`--check` is the default when neither `--check` nor `--apply` is supplied. `--check` and `--apply` are mutually exclusive. `--watch` without `--apply` reports drift only. Diff categories are `added`, `modified`, `deprecated`, `unchanged`, and `errors`; there is no implicit `deleted` category.
+`--check` is the default when neither `--check` nor `--apply` is supplied. `--check` and `--apply` are mutually exclusive. `--run-changed` requires `--apply`; it runs the exact pytest node IDs for added/modified active scenarios after a successful collection. `--watch` without `--apply` reports drift only. Diff categories are `added`, `modified`, `deprecated`, `unchanged`, and `errors`; there is no implicit `deleted` category.
 
 Exit codes:
 - `0`: valid and no drift (`--check`), or apply succeeded and post-write collection passed.
@@ -1252,6 +1255,7 @@ Acceptance criteria:
 - A forced post-write collection failure restores all affected files and leaves no lock/temp file.
 - SHA-256 assertions prove untouched managed blocks are byte-identical after neighboring add/modify/deprecate operations.
 - Workbook hash is identical before and after every mode, including `--apply` and `--watch`.
+- `--apply --run-changed` executes only added/modified active scenarios, reports their IDs and Allure path, and prints an exact retry command plus code/locator debugging scope on runtime failure.
 - CI `validate` runs `uv run python scripts/sync_engine.py --check` before pytest collection once Task 14 lands.
 - Full verification passes: unit sync tests, seven BDD scenarios collected, and `git diff --check` clean.
 
