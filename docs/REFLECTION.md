@@ -74,14 +74,15 @@ reliable.
 
 ## Current Limitations
 
-- The suite is serial and shares one Appium session.
+- Each device worker is serial; matrix mode adds device-level concurrency but
+  does not parallelize multiple Appium sessions on the same target.
 - Full package reset makes each scenario slower than a targeted state fixture.
 - iOS locators and all seven scenarios are validated on an iPhone 17 simulator
   running iOS 26.5; other device profiles and locale settings remain unverified.
 - Photo attachment and broader Settings/Analytics behavior are outside the
   seven-scenario scope.
 - GitHub-hosted E2E requires an externally downloadable APK through the
-  `TRACKIFY_APK_URL` secret; without it, CI performs collection only.
+  `TRACKIFY_APK_URL` secret; without it, CI performs unit tests and collection.
 - `summary.xlsx` generation was intentionally deferred from Task 11.
 
 ## AI Assistance
@@ -95,8 +96,8 @@ running app rather than accepting generated code at face value.
 
 ## Next Improvements
 
-1. Add Task 13 failure triage after the existing screenshot hook, while keeping
-   the local heuristic independent of any API key.
+1. Calibrate Task 13 signature precision against a larger set of real failures
+   while keeping every verdict advisory and the LLM fallback opt-in.
 2. Ask the app team for stable semantic IDs on text fields, date groups, and
    bottom navigation.
 3. Validate the iOS locator set on a simulator and isolate native picker

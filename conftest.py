@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import warnings
 from collections.abc import Generator
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import allure
 import pytest
 
+from ai.triage import (
+    MAX_RESULT_TEXT_LENGTH,
+    SCHEMA_VERSION,
+    TriageResult,
+    redact_sensitive_text,
+    triage_failure,
+)
 from flow.add_transaction_flow import AddTransactionFlow
 from flow.app_setup_flow import AppSetupFlow
 from flow.transactions_flow import TransactionsFlow
@@ -29,6 +38,7 @@ SCREENSHOT_DIR = Path(
     os.getenv("SCREENSHOT_DIR", PROJECT_ROOT / "report" / "screenshots")
 ).expanduser()
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
+_TRIAGED_FAILURE = pytest.StashKey[bool]()
 
 
 class FeatureFile(pytest.File):
@@ -108,11 +118,81 @@ def pytest_runtest_makereport(
     item: pytest.Item,
     call: pytest.CallInfo[Any],
 ) -> Generator[None, Any, None]:
-    """Attach a screenshot to Allure for call-stage failures."""
+    """Capture call failures and triage the first failed test phase."""
     outcome = yield
     report = outcome.get_result()
-    if report.when == "call" and report.failed and call.excinfo is not None:
-        _capture_failure_screenshot(item)
+    if report.failed and call.excinfo is not None:
+        screenshot_path = (
+            _capture_failure_screenshot(item) if report.when == "call" else None
+        )
+        _triage_first_failure(item, call, report, screenshot_path)
+
+
+def _triage_first_failure(
+    item: pytest.Item,
+    call: pytest.CallInfo[Any],
+    report: pytest.TestReport,
+    screenshot_path: Path | None,
+) -> None:
+    """Attach and print one advisory triage result for the first failed phase."""
+    if item.stash.get(_TRIAGED_FAILURE, False):
+        return
+    item.stash[_TRIAGED_FAILURE] = True
+
+    try:
+        result = triage_failure(
+            {
+                "error_msg": str(call.excinfo.value),
+                "traceback": str(call.excinfo.getrepr(style="long")),
+                "test_name": item.nodeid,
+                "phase": report.when,
+                "screenshot_path": screenshot_path,
+            }
+        )
+    except Exception:
+        result = TriageResult(
+            category="Unknown",
+            confidence=0.0,
+            reasoning="Failure triage raised an internal error.",
+            next_action="Review the original failure and reporting diagnostics.",
+            classifier="disabled",
+            matched_signatures=(),
+        )
+
+    safe_test_name = redact_sensitive_text(item.nodeid)[:MAX_RESULT_TEXT_LENGTH]
+    attachment = {
+        "schema_version": SCHEMA_VERSION,
+        "test_name": safe_test_name,
+        "phase": report.when,
+        **asdict(result),
+    }
+    try:
+        allure.attach(
+            json.dumps(attachment, indent=2, ensure_ascii=True),
+            name="AI Triage",
+            attachment_type=allure.attachment_type.JSON,
+        )
+    except Exception as exc:
+        warnings.warn(
+            pytest.PytestWarning(f"Could not attach AI Triage result: {exc}"),
+            stacklevel=1,
+        )
+
+    line = (
+        f"[AI Triage] {result.category} ({result.confidence:.0%}): "
+        f"{result.reasoning}"
+    )
+    try:
+        terminal_reporter = item.config.pluginmanager.getplugin("terminalreporter")
+        if terminal_reporter is not None:
+            terminal_reporter.write_line(line)
+        else:
+            print(line)
+    except Exception as exc:
+        warnings.warn(
+            pytest.PytestWarning(f"Could not print AI Triage result: {exc}"),
+            stacklevel=1,
+        )
 
 
 def _capture_failure_screenshot(item: pytest.Item) -> Path | None:
@@ -169,15 +249,20 @@ def driver(pytestconfig: pytest.Config) -> Generator[Any, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def reset_app_state(driver: Any) -> Generator[None, None, None]:
+def reset_app_state(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     """Wipe Trackify local data before every test for deterministic state.
 
     Args:
-        driver: The active Appium driver fixture.
+        request: Current pytest request, used to isolate unit tests from Appium.
 
     Yields:
         None after relaunching the app under test.
     """
+    if request.node.get_closest_marker("unit") is not None:
+        yield
+        return
+
+    driver = request.getfixturevalue("driver")
     platform = str(driver.capabilities.get("platformName", "")).lower()
     app_id = IOS_BUNDLE_ID if platform == "ios" else PKG
 

@@ -6,6 +6,7 @@ import unittest
 
 from scripts.run_device_matrix import (
     Device,
+    UNIT_TEST_IGNORE,
     build_assignments,
     extract_collected_nodeids,
     normalize_pytest_args,
@@ -32,6 +33,9 @@ class DeviceMatrixDistributionTests(unittest.TestCase):
             ["-m", "smoke"],
         )
         self.assertEqual(normalize_pytest_args(["-q"]), ["-q"])
+
+    def test_mobile_matrix_excludes_pytest_unit_directory(self) -> None:
+        self.assertEqual(UNIT_TEST_IGNORE, "--ignore=tests/unit")
 
     def test_extract_collected_nodeids_ignores_warnings_and_summary(self) -> None:
         output = """tests/step_defs/a.py::test_one

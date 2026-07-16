@@ -21,6 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT_ROOT = ROOT / "report" / "device-matrix"
 SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
+UNIT_TEST_IGNORE = "--ignore=tests/unit"
 
 
 @dataclass(frozen=True)
@@ -289,6 +290,7 @@ def collect_test_nodeids(args: argparse.Namespace) -> list[str]:
         str(args.python),
         "-m",
         "pytest",
+        UNIT_TEST_IGNORE,
         *normalize_pytest_args(args.pytest_args),
         "--collect-only",
         "-q",
@@ -421,6 +423,7 @@ def start_device(
         "-m",
         "pytest",
         "-q",
+        UNIT_TEST_IGNORE,
         f"--alluredir={allure_dir}",
         f"--junitxml={junit_path}",
         *pytest_args,

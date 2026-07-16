@@ -37,8 +37,11 @@ jobs:
       - name: Test device-matrix distribution
         run: uv run python -m unittest discover -s unit_tests -v
 
+      - name: Test AI failure triage
+        run: uv run pytest -m unit tests/unit/test_triage.py -q
+
       - name: Collect BDD scenarios
-        run: uv run pytest --collect-only -q
+        run: uv run pytest -m "not unit" --collect-only -q
 
   mobile-e2e:
     name: Android mobile E2E
@@ -125,7 +128,7 @@ jobs:
             done
             curl --fail --silent "${APPIUM_SERVER_URL}/status" > /dev/null
             set +e
-            uv run pytest --alluredir=allure-results
+            uv run pytest -m "not unit" --alluredir=allure-results
             test_exit=$?
             set -e
             allure generate allure-results --clean --output allure-report
