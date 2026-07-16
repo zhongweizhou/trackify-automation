@@ -6,15 +6,17 @@ import json
 import math
 import os
 import re
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 SCHEMA_VERSION = 1
 LOCAL_CONFIDENCE_THRESHOLD = 0.70
-ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 ANTHROPIC_VERSION = "2023-06-01"
 LLM_TIMEOUT_SECONDS = 5
 MAX_ERROR_MESSAGE_LENGTH = 2_000
@@ -317,9 +319,35 @@ def _build_llm_request(failure: NormalizedFailure, model: str) -> dict[str, Any]
     }
 
 
-def _call_anthropic(request_payload: dict[str, Any], api_key: str) -> Any:
+def _anthropic_messages_url(base_url: str) -> str:
+    """Build one safe Messages endpoint without discarding a gateway path."""
+    normalized = base_url.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            "ANTHROPIC_BASE_URL must be an HTTP(S) URL without credentials, "
+            "query, or fragment"
+        )
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/v1/messages"):
+        path += "/v1/messages"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _call_anthropic(
+    request_payload: dict[str, Any],
+    api_key: str,
+    base_url: str,
+) -> Any:
     request = urllib.request.Request(
-        ANTHROPIC_MESSAGES_URL,
+        _anthropic_messages_url(base_url),
         data=json.dumps(request_payload).encode("utf-8"),
         headers={
             "content-type": "application/json",
@@ -382,6 +410,17 @@ def _validate_llm_result(response: Any) -> TriageResult:
     )
 
 
+def _llm_failure_reason(error: Exception) -> str:
+    """Return bounded diagnostics without response bodies, URLs, or secrets."""
+    if isinstance(error, urllib.error.HTTPError):
+        return f"LLM fallback request failed with HTTP {error.code}."
+    if isinstance(error, (TimeoutError, urllib.error.URLError)):
+        return "LLM fallback request timed out or could not connect."
+    if isinstance(error, (ValueError, json.JSONDecodeError)):
+        return "LLM fallback returned an invalid response."
+    return f"LLM fallback failed with {type(error).__name__}."
+
+
 def triage_failure(
     failure: Mapping[str, Any],
     *,
@@ -411,15 +450,19 @@ def triage_failure(
         )
 
     request_payload = _build_llm_request(normalized, model)
+    base_url = os.getenv(
+        "ANTHROPIC_BASE_URL",
+        DEFAULT_ANTHROPIC_BASE_URL,
+    ).strip() or DEFAULT_ANTHROPIC_BASE_URL
     try:
         response = (
             llm_callable(request_payload)
             if llm_callable is not None
-            else _call_anthropic(request_payload, api_key)
+            else _call_anthropic(request_payload, api_key, base_url)
         )
         return _validate_llm_result(response)
-    except Exception:
+    except Exception as exc:
         return _unknown_result(
             "llm",
-            "LLM fallback timed out or returned an invalid response.",
+            _llm_failure_reason(exc),
         )

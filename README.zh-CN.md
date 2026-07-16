@@ -513,13 +513,34 @@ pytest 的首个失败阶段（`setup`、`call` 或 `teardown`）会生成一次
 Allure 中会附加名为 `AI Triage` 的 JSON，包含 schema 版本、测试名称、失败
 阶段、分类、置信度、原因、建议动作、分类器和命中的本地签名 ID。
 
-Claude fallback 默认关闭。只有主动配置以下三个变量时才会启用：
+Claude 兼容 fallback 默认关闭。只有主动配置开关、API Key 和模型时才会
+启用；`ANTHROPIC_BASE_URL` 可选，默认使用 Anthropic 官方地址。MiniMax
+Anthropic 兼容接口配置如下：
 
 ```bash
 export AI_TRIAGE_LLM_ENABLED=1
+export ANTHROPIC_BASE_URL="https://api.minimaxi.com/anthropic"
 export ANTHROPIC_API_KEY="<key>"
-export ANTHROPIC_MODEL="<model>"
+export ANTHROPIC_MODEL="MiniMax-M3"
 ```
+
+引擎会保留网关路径并自动追加 `/v1/messages`。可以复制 `.env.example`，但
+项目不会自动加载 `.env`，需要执行 `set -a; source .env; set +a`；`.env` 已
+被忽略，严禁提交真实密钥。真实联调应使用裸 `AssertionError`，因为高置信度
+本地签名会按设计直接返回，不会访问 LLM。
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# 编辑 .env：开启 fallback，并替换占位 Key。
+set -a; source .env; set +a
+
+.venv/bin/python -c "from dataclasses import asdict; from ai.triage import triage_failure; print(asdict(triage_failure({'error_msg': 'AssertionError', 'traceback': '', 'test_name': 'live_probe', 'phase': 'call'})))"
+```
+
+真实请求成功时会返回 `classifier: llm` 和模型生成的原因/建议；认证、额度、
+连接、超时或响应格式问题只输出安全的 HTTP 状态/错误类型，不会输出 Key 或
+接口响应正文。
 
 只有本地置信度低于 `0.70` 时才允许一次请求，不重试，总超时 5 秒。错误文本
 在网络调用前会被截断和脱敏，Authorization、Token、API Key 和 URL query

@@ -726,14 +726,36 @@ The always-on local stage uses deterministic signatures for `Locator`,
 as `AI Triage` JSON with the schema version, test, failing phase, category,
 confidence, reasoning, next action, classifier, and matched signature IDs.
 
-Claude fallback is disabled by default. Enable it only when all three variables
-are intentionally configured:
+Claude-compatible fallback is disabled by default. Enable it only when the
+switch, API key, and model are intentionally configured. `ANTHROPIC_BASE_URL`
+is optional and defaults to the official Anthropic endpoint. For the MiniMax
+Anthropic-compatible API:
 
 ```bash
 export AI_TRIAGE_LLM_ENABLED=1
+export ANTHROPIC_BASE_URL="https://api.minimaxi.com/anthropic"
 export ANTHROPIC_API_KEY="<key>"
-export ANTHROPIC_MODEL="<model>"
+export ANTHROPIC_MODEL="MiniMax-M3"
 ```
+
+The engine appends `/v1/messages` without discarding a gateway path. Copying
+`.env.example` is optional; this project does not auto-load `.env`, so source it
+explicitly with `set -a; source .env; set +a`. `.env` is ignored and must never
+be committed. Use a bare `AssertionError` for a live probe because strong local
+signatures intentionally return before the network fallback.
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# Edit .env: enable the fallback and replace the placeholder key.
+set -a; source .env; set +a
+
+.venv/bin/python -c "from dataclasses import asdict; from ai.triage import triage_failure; print(asdict(triage_failure({'error_msg': 'AssertionError', 'traceback': '', 'test_name': 'live_probe', 'phase': 'call'})))"
+```
+
+A successful live call reports `classifier: llm` with a non-placeholder
+reasoning/action. A safe `HTTP 401`, `429`, connection, timeout, or invalid
+response diagnosis is returned without exposing the endpoint response or key.
 
 The fallback is attempted only below `0.70` local confidence. It uses one
 standard-library HTTP request, no retry, and a five-second timeout. Failure text

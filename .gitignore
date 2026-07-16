@@ -7,6 +7,9 @@ __pycache__/
 .python-version
 .venv/
 venv/
+.env
+.env.*
+!.env.example
 
 # Local mobile app bundles and generated artifacts
 app/
