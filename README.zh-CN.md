@@ -10,7 +10,7 @@
 
 ---
 
-## 面试官快速入口
+## 快速入口
 
 这个仓库不仅包含 UI 操作脚本，还将移动自动化作为一个小型测试平台来
 设计：架构边界明确、数据状态可重复、Android/iOS 共用业务用例、多设备
@@ -39,7 +39,7 @@
 
 ---
 
-## 面试官从 Clone 到报告的执行手册
+## 从 Clone 到报告的执行手册
 
 当本机 Android/iOS 工具链和模拟器已经准备好后，可以严格按下面步骤从
 clone 代码执行到生成报告，无需先理解框架内部实现。
@@ -131,7 +131,7 @@ appium
 open "$(find report/device-matrix/preprod -path '*/allure-report/index.html' -print | sort | tail -1)"
 ```
 
-如果面试官只配置了一种平台，可以执行：
+如果本机只配置了一种平台，可以执行：
 
 ```bash
 # 所有 Android 设备

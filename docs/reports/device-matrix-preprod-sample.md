@@ -4,7 +4,7 @@
 
 This committed example was captured from an actual full-suite matrix run. It
 keeps the environment, device identity, operating-system version, case result,
-and duration visible to reviewers without requiring access to generated local
+and duration visible without requiring access to generated local
 artifacts.
 
 ## English
@@ -65,7 +65,7 @@ allure-results/             merged raw Allure results
 ```
 
 Generated artifacts are intentionally ignored by Git. This sanitized Markdown
-snapshot is committed as stable reviewer evidence.
+snapshot is committed as a stable report example.
 
 ## 中文
 

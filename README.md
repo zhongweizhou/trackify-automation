@@ -12,7 +12,7 @@
 
 ---
 
-## Interviewer Quick View
+## Quick View
 
 This repository demonstrates more than a set of UI scripts: it treats mobile
 automation as a small test platform with explicit architecture, deterministic
@@ -40,10 +40,10 @@ currently shipped runtime.
 
 ---
 
-## Reviewer Reproduction Guide
+## Reproduction Guide
 
 Once Android/iOS tooling and simulators are available, the following path takes
-a reviewer from clone to a report without needing to understand the framework
+any user from clone to a report without needing to understand the framework
 internals first.
 
 ### 1. Clone and install dependencies
@@ -619,7 +619,7 @@ After every run, see:
 
 - **Allure report**: `allure-report/index.html` (open in browser)
 - **Screenshots on failure**: `report/screenshots/`
-- **Committed reviewer example**: [preprod Android + iOS matrix report](docs/reports/device-matrix-preprod-sample.md)
+- **Committed report example**: [preprod Android + iOS matrix report](docs/reports/device-matrix-preprod-sample.md)
 
 ### Latest Verified Run
 
