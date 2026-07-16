@@ -24,6 +24,7 @@ the image to open it at full resolution.
 ### Run Summary
 
 - Environment: `preprod`
+- Distribution: `replicate` (the full suite ran on both devices)
 - Overall status: **PASSED**
 - Started: `2026-07-16 07:17:17 +08:00`
 - Completed: `2026-07-16 07:21:35 +08:00`
@@ -84,6 +85,7 @@ snapshot is committed as a stable report example.
 ### 执行摘要
 
 - 测试环境：`preprod`
+- 分发模式：`replicate`（两台设备分别执行完整测试套件）
 - 总体结果：**通过**
 - 开始时间：`2026-07-16 07:17:17 +08:00`
 - 完成时间：`2026-07-16 07:21:35 +08:00`

@@ -29,7 +29,7 @@
 | 分层架构 | Gherkin → Step Definitions → Flow → Page Object → Appium Driver，各层职责单一 |
 | 跨平台定位 | Android/iOS 定位器统一放在 YAML；优先语义化 `accessibility_id`，必要时使用受控 fallback |
 | 确定性隔离 | 每条用例前清理应用数据，再完成一致的姓名、币种、月预算、Bank SMS Reader 初始化 |
-| 多设备并发 | 一个命令发现全部可用 Android/iOS 设备，并为每台设备启动独立 pytest 进程 |
+| 多设备并发 | 一个命令发现全部可用 Android/iOS 设备，并通过独立 pytest 进程选择全量复制或用例分片 |
 | Appium 端口隔离 | 为 Android `systemPort`、iOS WDA/MJPEG 端口和 derived-data 目录分配唯一值 |
 | 可追溯报告 | 记录环境、平台、设备、系统版本、UDID、逐用例结果、JUnit、日志、截图和合并 Allure |
 | 可评审过程 | 技术规格明确分层规则、验收标准、反模式和按任务拆分的提交纪律 |
@@ -106,6 +106,11 @@ appium
 
 ```bash
 .venv/bin/python scripts/run_device_matrix.py --list
+
+# 同时预览设备发现结果和具体用例分片，不执行测试
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --list
 ```
 
 确认列表中包含计划执行的每台设备、系统版本和 UDID。这个预检命令不会
@@ -116,7 +121,15 @@ appium
 ```bash
 # 在发现的全部 Android + iOS 设备上并发执行 7 个场景
 .venv/bin/python scripts/run_device_matrix.py --env preprod
+
+# 将 7 个场景分摊到全部设备，每个场景只执行一次
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod
 ```
+
+默认的 `replicate` 模式用于验证每台设备上的完整兼容性；需要缩短整套测试
+执行时间时，使用 `split` 将互不重叠的用例子集分配给各设备。
 
 执行结束后，终端会输出本次报告的准确路径：
 
@@ -178,6 +191,14 @@ Page 和 YAML Locator 层。
 .venv/bin/python scripts/run_device_matrix.py --env preprod
 ```
 
+如果希望整套 7 个场景只执行一次，并分摊到全部设备：
+
+```bash
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod
+```
+
 运行器默认测试环境为 `preprod`，会自动发现：
 
 - `adb devices` 中状态为 ready 的 Android 模拟器和真机；
@@ -202,6 +223,9 @@ Page 和 YAML Locator 层。
 ```bash
 # 只校验 Python 导入、Gherkin、步骤绑定和 marker，不启动 Appium
 uv run pytest --collect-only -q
+
+# 不需要 Appium/设备，验证矩阵分片算法
+.venv/bin/python -m unittest discover -s unit_tests -v
 ```
 
 ### 2. 单设备完整执行
@@ -277,12 +301,29 @@ transactions_grouped_by_date_with_section_headers
 
 ### 6. 多设备矩阵执行
 
+两种分发模式：
+
+| 模式 | 7 条用例、2 台设备时的行为 | 适用场景 |
+|---|---|---|
+| `replicate`（默认） | A 跑 7 条，B 跑 7 条，共 14 次设备维度执行 | 验证不同平台/设备兼容性 |
+| `split` | A 跑 4 条，B 跑 3 条，共 7 次设备维度执行 | 缩短一整套测试的反馈时间 |
+
 ```bash
 # 仅发现并列出设备，不执行测试
 .venv/bin/python scripts/run_device_matrix.py --list
 
+# 预览每台设备分到的具体用例，不启动 Appium 会话
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --list
+
 # 全部 Android + iOS 设备，执行完整 7 个场景
 .venv/bin/python scripts/run_device_matrix.py --env preprod
+
+# 将完整 7 个场景分摊到全部设备，每条只执行一次
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod
 
 # 仅全部 Android 设备
 .venv/bin/python scripts/run_device_matrix.py \
@@ -301,12 +342,14 @@ transactions_grouped_by_date_with_section_headers
 
 # 指定多台设备；--device 可以重复
 .venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
   --env preprod \
   --device emulator-5554 \
   --device BFE1DE67-0F95-47B7-A02A-D25EE83CD999
 
 # 在所有设备上只运行 smoke 场景；-- 后参数会透传给 pytest
 .venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
   --env preprod \
   -- \
   -m smoke
@@ -347,12 +390,13 @@ uv run pytest -s -vv
 
 1. 自动发现 Android、iOS 模拟器和已配对 iOS 真机；
 2. 为每台设备启动独立 pytest 子进程，实现并发执行；
-3. 为每个 Android 会话分配独立 `systemPort`；
-4. 为每个 iOS 会话分配独立 WDA、MJPEG 端口和 derived-data 目录；
-5. 每台设备拥有独立日志、JUnit、Allure 原始结果和失败截图目录；
-6. 执行结束后合并 Allure 结果，并生成 Markdown 和 JSON 总结；
-7. 每条报告附带环境、平台、设备名、系统版本和 UDID；
-8. Android 使用 `pm clear`、iOS 模拟器使用 `mobile: clearApp`，iOS 真机
+3. 支持 `replicate` 全量复制和 `split` 互斥分片两种策略；
+4. 为每个 Android 会话分配独立 `systemPort`；
+5. 为每个 iOS 会话分配独立 WDA、MJPEG 端口和 derived-data 目录；
+6. 每台设备拥有独立日志、JUnit、Allure 原始结果和失败截图目录；
+7. 执行结束后合并 Allure 结果，并生成 Markdown 和 JSON 总结；
+8. 每条报告附带环境、分片策略、测试 node ID、设备名、系统版本和 UDID；
+9. Android 使用 `pm clear`、iOS 模拟器使用 `mobile: clearApp`，iOS 真机
    通过卸载重装签名应用保证场景隔离。
 
 输出目录：
@@ -473,7 +517,8 @@ appium
 
 `.github/workflows/ci.yml` 提供两层校验：
 
-- push 到 `test`、Pull Request 和手动触发时，安装依赖并收集全部 7 个场景；
+- push 到 `test`、Pull Request 和手动触发时，安装依赖、运行无需设备的矩阵
+  分片单元测试，并收集全部 7 个 BDD 场景；
 - 配置 `TRACKIFY_APK_URL` 后，在 Android API 34 模拟器中执行完整 E2E；
 - 上传 Allure 原始结果、HTML 报告、失败截图和 Appium 日志；
 - 未配置 APK secret 时只跳过移动 E2E，测试收集仍然作为合并门禁。

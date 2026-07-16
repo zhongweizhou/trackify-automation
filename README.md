@@ -29,7 +29,7 @@ state, cross-platform execution, and attributable reports.
 | Layered architecture | Gherkin → Step Definitions → Flow → Page Object → Appium Driver; each layer has a clear ownership boundary |
 | Cross-platform locator strategy | Platform-specific YAML locators with `accessibility_id` first and bounded fallback strategies for Flutter semantics |
 | Deterministic isolation | App state is reset before every scenario, then the same required onboarding baseline is completed |
-| Multi-device concurrency | One command discovers all ready Android and iOS targets and runs one isolated pytest worker per device |
+| Multi-device concurrency | One command discovers all ready Android and iOS targets, then either replicates or shards the suite across isolated workers |
 | Collision-free Appium sessions | Unique Android `systemPort`, iOS WDA/MJPEG ports, and WDA derived-data paths per device |
 | Traceable reporting | Environment, platform, device, OS version, UDID, per-case result, JUnit, logs, screenshots, and merged Allure results |
 | Reviewable engineering process | The technical specification defines layer rules, acceptance criteria, anti-patterns, and task-sized commits |
@@ -109,6 +109,11 @@ In a second terminal, from the repository root:
 
 ```bash
 .venv/bin/python scripts/run_device_matrix.py --list
+
+# Preview both device discovery and split assignment without running tests
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --list
 ```
 
 Confirm that every intended device, OS version, and UDID appears in the list.
@@ -119,7 +124,16 @@ This command does not install the app or execute tests.
 ```bash
 # All 7 scenarios on every discovered Android and iOS target
 .venv/bin/python scripts/run_device_matrix.py --env preprod
+
+# Split the 7 scenarios across all targets; each scenario runs exactly once
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod
 ```
+
+The default `replicate` distribution validates the full suite on every device.
+Use `split` when the goal is reducing total suite duration by assigning a
+disjoint subset to each device.
 
 The runner prints the exact summary and Allure paths when it finishes:
 
@@ -235,13 +249,15 @@ test suite. Detailed examples follow it.
 | Category | Command | Purpose |
 |---|---|---|
 | Validate collection | `uv run pytest --collect-only -q` | Parse imports, Gherkin, steps, and markers without opening an Appium session |
+| Matrix unit tests | `.venv/bin/python -m unittest discover -s unit_tests -v` | Validate device sharding without Appium or a mobile device |
 | Default single device | `uv run pytest` | Run all 7 scenarios on the default Android target |
 | Explicit Android device | `PLATFORM=android DEVICE_UDID=<udid> APP_PATH="$PWD/app/app-release.apk" uv run pytest` | Run all scenarios on one Android emulator or physical device |
 | Explicit iOS simulator | `PLATFORM=ios DEVICE_UDID=<udid> APP_PATH="$PWD/app/Runner.app" uv run pytest` | Run all scenarios on one booted iOS simulator |
 | Feature | `uv run pytest tests/features/add_transaction.feature -q` | Run one feature file (5 Add Transaction scenarios) |
 | Marker | `uv run pytest -m smoke -q` | Run a priority or functional subset |
 | Scenario | `uv run pytest -k "add_expense_happy_path" -q` | Run one generated pytest scenario name |
-| All devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod` | Run all 7 scenarios concurrently on every discovered Android and iOS target |
+| Replicate across devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod` | Run all 7 scenarios on every discovered Android and iOS target |
+| Split across devices | `.venv/bin/python scripts/run_device_matrix.py --distribution split --env preprod` | Split the selected suite across devices so each scenario runs exactly once |
 | Android matrix | `.venv/bin/python scripts/run_device_matrix.py --platform android --env preprod` | Run all connected Android targets concurrently |
 | iOS matrix | `.venv/bin/python scripts/run_device_matrix.py --platform ios --env preprod` | Run all booted iOS simulators and paired iOS devices concurrently |
 | Selected devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod --device <udid-1> --device <udid-2>` | Run only the listed devices; repeat `--device` as needed |
@@ -374,15 +390,31 @@ uv run pytest
 
 The device-matrix runner discovers every ready Android target from `adb` and
 every booted iOS simulator from `simctl`. It starts one isolated pytest process
-per device and runs them concurrently. The test environment defaults to
-`preprod`.
+per device and runs them concurrently. `replicate` runs the selected suite on
+every device; `split` distributes disjoint subsets across devices. The test
+environment defaults to `preprod`.
+
+| Distribution | Behavior with 7 tests and 2 devices | Best for |
+|---|---|---|
+| `replicate` (default) | A runs 7, B runs 7; 14 device-case executions | Cross-platform/device compatibility coverage |
+| `split` | A runs 4, B runs 3; 7 device-case executions | Faster feedback for one logical suite |
 
 ```bash
 # Preview the discovered matrix without running tests
 .venv/bin/python scripts/run_device_matrix.py --list
 
+# Preview the exact split assignment without starting Appium sessions
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --list
+
 # Run all seven scenarios on every discovered Android and iOS device
 .venv/bin/python scripts/run_device_matrix.py --env preprod
+
+# Split all seven scenarios across discovered devices (4 + 3 on two devices)
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod
 
 # Run every connected Android device only
 .venv/bin/python scripts/run_device_matrix.py \
@@ -397,6 +429,13 @@ per device and runs them concurrently. The test environment defaults to
 # Run only smoke scenarios on the full matrix
 .venv/bin/python scripts/run_device_matrix.py --env preprod -- -m smoke
 
+# Collect smoke scenarios, then split that subset across the matrix
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod \
+  -- \
+  -m smoke
+
 # Run one device by UDID
 .venv/bin/python scripts/run_device_matrix.py \
   --env preprod \
@@ -404,6 +443,7 @@ per device and runs them concurrently. The test environment defaults to
 
 # Run a selected Android + iOS pair (repeat --device for more targets)
 .venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
   --env preprod \
   --device emulator-5554 \
   --device BFE1DE67-0F95-47B7-A02A-D25EE83CD999
@@ -449,7 +489,10 @@ report/device-matrix/<environment>/<timestamp>/
 
 Every Allure test result includes the environment, platform, device name,
 operating-system version, and UDID. The matrix summary reports passed, failed,
-error, and skipped counts separately for each device.
+error, and skipped counts separately for each device. It also records the
+distribution strategy and the exact node IDs assigned to each device. If there
+are more devices than selected tests in `split` mode, excess devices remain
+idle instead of starting empty pytest sessions.
 
 See the committed [preprod matrix report example](docs/reports/device-matrix-preprod-sample.md),
 captured from a real run of all seven scenarios on Android 17 and iOS 26.5.
@@ -519,6 +562,7 @@ trackify-automation/
 │   │   └── transactions.feature    # Filter and grouping scenarios
 │   ├── step_defs/                  # pytest-bdd step implementations
 │   └── __init__.py
+├── unit_tests/                     # Device-free matrix sharding tests
 ├── locator/
 │   ├── onboarding.yaml
 │   ├── home.yaml
@@ -693,8 +737,9 @@ simulator profile, locale, or 12/24-hour time setting.
 
 The workflow at `.github/workflows/ci.yml` has two levels:
 
-- Every push to `test`, pull request, and manual dispatch installs dependencies
-  and collects all seven scenarios.
+- Every push to `test`, pull request, and manual dispatch installs dependencies,
+  runs device-free matrix distribution unit tests, and collects all seven BDD
+  scenarios.
 - Full Android E2E requires a repository secret named `TRACKIFY_APK_URL` that
   points to a downloadable APK. This is necessary because the app binary is not
   committed.

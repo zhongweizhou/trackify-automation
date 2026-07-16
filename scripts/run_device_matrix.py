@@ -1,4 +1,4 @@
-"""Run the Trackify pytest suite concurrently on every connected device."""
+"""Run the Trackify pytest suite concurrently across connected devices."""
 
 from __future__ import annotations
 
@@ -72,7 +72,17 @@ class DeviceResult:
     junit_path: str
     allure_results: str
     screenshots: str
+    assigned_nodeids: list[str] | None
     cases: list[TestCaseResult]
+
+
+@dataclass(frozen=True)
+class DeviceAssignment:
+    """A device and the optional test shard assigned to it."""
+
+    device: Device
+    assigned_nodeids: tuple[str, ...] | None
+    deselected_nodeids: tuple[str, ...] = ()
 
 
 @dataclass
@@ -87,6 +97,7 @@ class RunningDevice:
     allure_dir: Path
     screenshot_dir: Path
     junit_path: Path
+    assigned_nodeids: tuple[str, ...] | None
 
 
 def _run(command: list[str], timeout: int = 15) -> str:
@@ -254,6 +265,91 @@ def discover_devices(platform: str, selected_udids: set[str]) -> list[Device]:
     return devices
 
 
+def normalize_pytest_args(pytest_args: list[str]) -> list[str]:
+    """Remove argparse's optional separator before forwarding pytest arguments."""
+    normalized = list(pytest_args)
+    if normalized and normalized[0] == "--":
+        normalized.pop(0)
+    return normalized
+
+
+def extract_collected_nodeids(output: str) -> list[str]:
+    """Extract ordered pytest node IDs from quiet collection output."""
+    nodeids: list[str] = []
+    for line in output.splitlines():
+        candidate = line.strip()
+        if candidate.startswith("tests/") and "::" in candidate:
+            nodeids.append(candidate)
+    return nodeids
+
+
+def collect_test_nodeids(args: argparse.Namespace) -> list[str]:
+    """Collect the selected pytest tests without creating an Appium session."""
+    command = [
+        str(args.python),
+        "-m",
+        "pytest",
+        *normalize_pytest_args(args.pytest_args),
+        "--collect-only",
+        "-q",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"pytest collection failed: {detail}")
+    nodeids = extract_collected_nodeids(completed.stdout)
+    if not nodeids:
+        raise ValueError("pytest collection selected zero tests; nothing can be split.")
+    return nodeids
+
+
+def split_nodeids(nodeids: list[str], shard_count: int) -> list[list[str]]:
+    """Distribute node IDs round-robin without creating empty shards."""
+    if shard_count < 1:
+        raise ValueError("shard_count must be at least 1.")
+    if not nodeids:
+        raise ValueError("At least one pytest node ID is required.")
+    shards = [[] for _ in range(min(shard_count, len(nodeids)))]
+    for index, nodeid in enumerate(nodeids):
+        shards[index % len(shards)].append(nodeid)
+    return shards
+
+
+def build_assignments(
+    devices: list[Device],
+    distribution: str,
+    nodeids: list[str] | None = None,
+) -> list[DeviceAssignment]:
+    """Build full-suite or split-suite assignments for the discovered devices."""
+    if distribution == "replicate":
+        return [DeviceAssignment(device=device, assigned_nodeids=None) for device in devices]
+    if nodeids is None:
+        raise ValueError("Split distribution requires collected pytest node IDs.")
+
+    shards = split_nodeids(nodeids, len(devices))
+    assignments: list[DeviceAssignment] = []
+    for device, shard in zip(devices[: len(shards)], shards, strict=True):
+        assigned = tuple(shard)
+        assigned_set = set(assigned)
+        assignments.append(
+            DeviceAssignment(
+                device=device,
+                assigned_nodeids=assigned,
+                deselected_nodeids=tuple(
+                    nodeid for nodeid in nodeids if nodeid not in assigned_set
+                ),
+            )
+        )
+    return assignments
+
+
 def check_appium(server_url: str) -> None:
     status_url = f"{server_url.rstrip('/')}/status"
     try:
@@ -302,11 +398,12 @@ def build_environment(
 
 
 def start_device(
-    device: Device,
+    assignment: DeviceAssignment,
     args: argparse.Namespace,
     index: int,
     run_root: Path,
 ) -> RunningDevice:
+    device = assignment.device
     device_dir = run_root / device.key
     allure_dir = device_dir / "allure-results"
     screenshot_dir = device_dir / "screenshots"
@@ -315,9 +412,10 @@ def start_device(
     allure_dir.mkdir(parents=True, exist_ok=True)
     screenshot_dir.mkdir(parents=True, exist_ok=True)
 
-    pytest_args = list(args.pytest_args)
-    if pytest_args and pytest_args[0] == "--":
-        pytest_args.pop(0)
+    pytest_args = normalize_pytest_args(args.pytest_args)
+    deselect_args = [
+        f"--deselect={nodeid}" for nodeid in assignment.deselected_nodeids
+    ]
     command = [
         str(args.python),
         "-m",
@@ -326,6 +424,7 @@ def start_device(
         f"--alluredir={allure_dir}",
         f"--junitxml={junit_path}",
         *pytest_args,
+        *deselect_args,
     ]
     environment = build_environment(
         device, args, index, allure_dir, screenshot_dir
@@ -341,7 +440,10 @@ def start_device(
     )
     print(
         f"[matrix] START {device.platform} {device.name} "
-        f"({device.os_version}, {device.udid}) pid={process.pid}"
+        f"({device.os_version}, {device.udid}) "
+        "tests="
+        f"{'all' if assignment.assigned_nodeids is None else len(assignment.assigned_nodeids)} "
+        f"pid={process.pid}"
     )
     return RunningDevice(
         device=device,
@@ -352,6 +454,7 @@ def start_device(
         allure_dir=allure_dir,
         screenshot_dir=screenshot_dir,
         junit_path=junit_path,
+        assigned_nodeids=assignment.assigned_nodeids,
     )
 
 
@@ -426,6 +529,11 @@ def finish_device(running: RunningDevice, environment: str) -> DeviceResult:
         junit_path=str(running.junit_path),
         allure_results=str(running.allure_dir),
         screenshots=str(running.screenshot_dir),
+        assigned_nodeids=(
+            list(running.assigned_nodeids)
+            if running.assigned_nodeids is not None
+            else None
+        ),
         cases=cases,
     )
     print(
@@ -436,7 +544,11 @@ def finish_device(running: RunningDevice, environment: str) -> DeviceResult:
     return result
 
 
-def combine_allure_results(run_root: Path, results: list[DeviceResult]) -> Path:
+def combine_allure_results(
+    run_root: Path,
+    results: list[DeviceResult],
+    distribution: str,
+) -> Path:
     combined_dir = run_root / "allure-results"
     combined_dir.mkdir(parents=True, exist_ok=True)
     for result in results:
@@ -456,6 +568,7 @@ def combine_allure_results(run_root: Path, results: list[DeviceResult]) -> Path:
     )
     properties = [
         f"Test.Environment={results[0].environment}",
+        f"Test.Distribution={distribution}",
         f"Devices.Count={len(results)}",
         f"Devices={devices}",
     ]
@@ -489,10 +602,12 @@ def write_summary(
     started_at: datetime,
     results: list[DeviceResult],
     allure_report: Path | None,
+    distribution: str,
 ) -> None:
     completed_at = datetime.now().astimezone()
     payload = {
         "environment": results[0].environment,
+        "distribution": distribution,
         "started_at": started_at.isoformat(),
         "completed_at": completed_at.isoformat(),
         "status": "PASSED" if all(item.status == "PASSED" for item in results) else "FAILED",
@@ -507,19 +622,22 @@ def write_summary(
         "# Device Matrix Test Summary",
         "",
         f"- Environment: `{payload['environment']}`",
+        f"- Distribution: `{payload['distribution']}`",
         f"- Status: **{payload['status']}**",
         f"- Started: `{payload['started_at']}`",
         f"- Completed: `{payload['completed_at']}`",
         f"- Devices: `{len(results)}`",
         "",
-        "| Platform | Type | Device | OS | UDID | Passed | Failed | Errors | "
+        "| Platform | Type | Device | OS | UDID | Assigned | Passed | Failed | Errors | "
         "Skipped | Duration | Status |",
-        "|---|---|---|---|---|---:|---:|---:|---:|---:|---|",
+        "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|",
     ]
     for result in results:
         lines.append(
             f"| {result.platform} | {result.target_type} | {result.device_name} | "
-            f"{result.os_version} | `{result.device_udid}` | {result.passed} | "
+            f"{result.os_version} | `{result.device_udid}` | "
+            f"{'all' if result.assigned_nodeids is None else len(result.assigned_nodeids)} | "
+            f"{result.passed} | "
             f"{result.failures} | "
             f"{result.errors} | {result.skipped} | {result.duration_seconds:.1f}s | "
             f"{result.status} |"
@@ -553,10 +671,16 @@ def write_summary(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run pytest concurrently on all connected Android and booted iOS devices."
+        description="Run pytest concurrently across connected Android and iOS devices."
     )
     parser.add_argument("--env", dest="environment", default="preprod")
     parser.add_argument("--platform", choices=("all", "android", "ios"), default="all")
+    parser.add_argument(
+        "--distribution",
+        choices=("replicate", "split"),
+        default="replicate",
+        help="Run the selected suite on every device or split it across devices",
+    )
     parser.add_argument("--device", action="append", default=[], help="Only run a UDID")
     parser.add_argument("--list", action="store_true", help="List targets without running")
     parser.add_argument("--appium-url", default="http://127.0.0.1:4723")
@@ -589,16 +713,45 @@ def main() -> int:
             f"  - {device.platform}: {device.name}, OS {device.os_version}, "
             f"{device.target_type}, UDID {device.udid}"
         )
+    collected_nodeids = (
+        collect_test_nodeids(args) if args.distribution == "split" else None
+    )
+    assignments = build_assignments(
+        devices,
+        args.distribution,
+        collected_nodeids,
+    )
+    active_devices = [assignment.device for assignment in assignments]
+    if args.distribution == "split":
+        print(
+            f"[matrix] Split {len(collected_nodeids or [])} test(s) across "
+            f"{len(assignments)} device(s):"
+        )
+        for assignment in assignments:
+            print(
+                f"  - {assignment.device.platform} {assignment.device.name}: "
+                f"{len(assignment.assigned_nodeids or ())} test(s)"
+            )
+            for nodeid in assignment.assigned_nodeids or ():
+                print(f"      {nodeid}")
+        for device in devices[len(assignments):]:
+            print(
+                f"  - {device.platform} {device.name}: idle "
+                "(more devices than selected tests)"
+            )
     if args.list:
         return 0
 
     check_appium(args.appium_url)
-    if any(device.platform == "Android" for device in devices) and not args.android_app.exists():
+    if (
+        any(device.platform == "Android" for device in active_devices)
+        and not args.android_app.exists()
+    ):
         raise FileNotFoundError(f"Android app not found: {args.android_app}")
-    simulators = [device for device in devices if device.target_type == "simulator"]
+    simulators = [device for device in active_devices if device.target_type == "simulator"]
     if simulators and not args.ios_app.exists():
         raise FileNotFoundError(f"iOS app not found: {args.ios_app}")
-    real_ios_devices = [device for device in devices if device.target_type == "real"]
+    real_ios_devices = [device for device in active_devices if device.target_type == "real"]
     if real_ios_devices and args.ios_real_app is None:
         raise FileNotFoundError(
             "Physical iOS devices were discovered; provide --ios-real-app with a "
@@ -613,13 +766,19 @@ def main() -> int:
     run_root.mkdir(parents=True, exist_ok=True)
 
     running = [
-        start_device(device, args, index, run_root)
-        for index, device in enumerate(devices)
+        start_device(assignment, args, index, run_root)
+        for index, assignment in enumerate(assignments)
     ]
     results = [finish_device(item, args.environment) for item in running]
-    combined_dir = combine_allure_results(run_root, results)
+    combined_dir = combine_allure_results(run_root, results, args.distribution)
     allure_report = generate_allure_report(run_root, combined_dir)
-    write_summary(run_root, started_at, results, allure_report)
+    write_summary(
+        run_root,
+        started_at,
+        results,
+        allure_report,
+        args.distribution,
+    )
 
     print(f"[matrix] Summary: {run_root / 'summary.md'}")
     if allure_report:
