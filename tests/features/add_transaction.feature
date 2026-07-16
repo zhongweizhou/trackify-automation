@@ -28,11 +28,11 @@ Feature: Add Transaction
   @smoke @p0
   Scenario: Add income happy path
     When user taps "Add Income"
-    And user enters amount "5000"
+    And user enters amount "5001"
     And user selects category "Salary"
     And user enters tags "salary,work"
     And user taps Save
-    Then transaction appears in Recent transactions with amount "5000.0"
+    Then transaction appears in Recent transactions with amount "5001.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
     And This Month summary is correct for budget "30000"
 
