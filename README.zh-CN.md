@@ -530,6 +530,106 @@ Page/Flow 和 YAML Locator。如果新增 Gherkin 词汇还没有 Step 实现，
 Excel；删除一行不代表删除用例，需要使用 `Automation Status=deprecated` 和
 明确的弃用版本。
 
+### 完整操作与验收步骤
+
+下面用“只修改一条 Excel 用例”为例，验证同步器是否只生成并执行对应场景。
+最后的恢复命令只适用于演练数据，真实用例修改不要恢复。
+
+1. 确认提交态基线：
+
+   ```bash
+   git status --short
+   uv run python scripts/sync_engine.py --check
+   echo $?
+   ```
+
+   正常基线应显示 `add_transaction` 5 条 unchanged、`transactions` 2 条
+   unchanged，退出码为 `0`。
+
+2. 打开 `data/test_cases.xlsx`，进入 `Test Cases` 工作表，找到
+   `TC_ADD_TX_001`。演练时可将金额 `100` 改成 `101`，需要同时修改：
+
+   - `Test Steps` 中的 `user enters amount "100"`；
+   - `Expected Result` 中所有对应的金额断言。
+
+   保存并关闭 Excel，避免 Excel 继续写临时文件。
+
+3. 只预览增量，不写 Feature：
+
+   ```bash
+   uv run python scripts/sync_engine.py --check
+   echo $?
+   git status --short
+   ```
+
+   预期只显示一条 `modified: TC_ADD_TX_001`，`transactions` 模块 0 变化，
+   退出码为 `1`。这里的 `1` 表示“数据合法但存在 drift”，不是同步异常。
+
+4. 选择一种应用方式。只验证生成和 collection、不启动设备时执行：
+
+   ```bash
+   uv run python scripts/sync_engine.py --apply
+   ```
+
+   如果需要应用后立即在 Android 上只执行变化用例，则直接执行：
+
+   ```bash
+   PLATFORM=android \
+   DEVICE_UDID=<Android设备UDID> \
+   APP_PATH="$PWD/app/app-release.apk" \
+   uv run python scripts/sync_engine.py --apply --run-changed
+   ```
+
+   Android UDID 可通过 `adb devices` 获取。已启动 iOS 模拟器时执行：
+
+   ```bash
+   PLATFORM=ios \
+   DEVICE_UDID=<iOS模拟器UDID> \
+   APP_PATH="$PWD/app/Runner.app" \
+   uv run python scripts/sync_engine.py --apply --run-changed
+   ```
+
+   iOS UDID 可通过 `xcrun simctl list devices booted` 获取。如果目标是执行
+   变化用例，不要先单独运行 `--apply`：apply 成功后已经没有 drift，随后再加
+   `--run-changed` 不会重复执行。已经 apply 时，需要再修改一次 Excel。
+
+5. 确认修改范围和最终状态：
+
+   ```bash
+   git diff -- tests/features/add_transaction.feature
+   git diff -- tests/features/transactions.feature
+   uv run python scripts/sync_engine.py --check
+   ```
+
+   预期只有 `TC_ADD_TX_001` 的受管块变化，最终检查退出 `0`。设备执行成功时
+   会输出用例 ID、准确 pytest node ID、执行数量和
+   `report/sync/<时间>/allure-results` 路径。
+
+6. 变化用例运行失败时，已经通过 collection 的 Feature 修改会保留，控制台
+   会给出准确重跑命令，并提示查看 Task 13 分类、失败截图、Allure、Step、
+   Page/Flow 和 YAML Locator。同步器不会自动修改 Locator。
+
+7. 可选回滚测试：只在 Excel 修改 Scenario Title，但不更新 Python 中对应的
+   `@scenario` 绑定，然后执行 `--apply`。预期 collection 失败并退出 `2`，
+   Feature 从备份恢复且锁文件被清理。Excel 不会回滚，因此修正标题前
+   `--check` 仍会报告 drift。
+
+8. 演练完成后恢复提交态基线：
+
+   ```bash
+   git restore data/test_cases.xlsx
+   uv run python scripts/sync_engine.py --apply
+   uv run python scripts/sync_engine.py --check
+   git status --short
+   ```
+
+   真实用例修改不要执行 `git restore`。`git status --short` 中，`M` 表示已跟踪
+   文件发生修改，`??` 表示未跟踪的新文件。`uv` 可能生成 `uv.lock`；它是依赖
+   锁文件，不是同步器产物，建议检查后与用例修改分开提交。
+
+命令退出码：`0` 表示零漂移或执行成功；`1` 表示 check 发现 drift，或者变化
+用例运行失败；`2` 表示校验、collection、锁或 I/O 异常。
+
 无需 Appium 或设备即可执行 Task 14 单元测试：
 
 ```bash

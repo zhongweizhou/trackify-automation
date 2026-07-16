@@ -751,6 +751,110 @@ The workbook itself is always read-only to the engine, including `--apply` and
 watch mode. Missing rows never mean delete; use `Automation Status=deprecated`
 with an explicit deprecated version.
 
+### End-to-end operator verification
+
+Use this workflow to prove that one Excel change updates and runs only one
+scenario. Keep any real case changes; the restore commands at the end are only
+for a disposable exercise.
+
+1. Establish the committed baseline:
+
+   ```bash
+   git status --short
+   uv run python scripts/sync_engine.py --check
+   echo $?
+   ```
+
+   A clean baseline reports five unchanged `add_transaction` cases and two
+   unchanged `transactions` cases, then exits `0`.
+
+2. Open `data/test_cases.xlsx`, select the `Test Cases` sheet, and find
+   `TC_ADD_TX_001`. For a simple drill, change amount `100` to `101` in both
+   `Test Steps` and every matching amount assertion in `Expected Result`. Save
+   and close Excel so it stops writing temporary files.
+
+3. Preview the scenario-level change without writing Feature files:
+
+   ```bash
+   uv run python scripts/sync_engine.py --check
+   echo $?
+   git status --short
+   ```
+
+   The expected result is exactly one `modified: TC_ADD_TX_001`, no change in
+   the `transactions` module, and exit `1`. Exit `1` here means valid drift was
+   found; it is not a sync error.
+
+4. Choose one apply path. To validate generation without a device, run:
+
+   ```bash
+   uv run python scripts/sync_engine.py --apply
+   ```
+
+   To apply and immediately run the changed case on Android instead, run:
+
+   ```bash
+   PLATFORM=android \
+   DEVICE_UDID=<android-udid> \
+   APP_PATH="$PWD/app/app-release.apk" \
+   uv run python scripts/sync_engine.py --apply --run-changed
+   ```
+
+   Get the Android UDID with `adb devices`. For a booted iOS simulator, use:
+
+   ```bash
+   PLATFORM=ios \
+   DEVICE_UDID=<ios-simulator-udid> \
+   APP_PATH="$PWD/app/Runner.app" \
+   uv run python scripts/sync_engine.py --apply --run-changed
+   ```
+
+   Get the iOS UDID with `xcrun simctl list devices booted`. Do not run plain
+   `--apply` first if the goal is changed-case execution: after a successful
+   apply there is no remaining drift, so a later `--run-changed` has nothing to
+   select. Edit the workbook again if generation was already applied.
+
+5. Confirm the scope and final state:
+
+   ```bash
+   git diff -- tests/features/add_transaction.feature
+   git diff -- tests/features/transactions.feature
+   uv run python scripts/sync_engine.py --check
+   ```
+
+   Only the managed `TC_ADD_TX_001` block should differ. The final check exits
+   `0`. A successful device run names the case, exact pytest node ID, scenario
+   count, and `report/sync/<timestamp>/allure-results` directory.
+
+6. Inspect failure feedback when a changed mobile case fails. The valid Feature
+   update stays in place for debugging, while the console prints the exact retry
+   command and points to Task 13 triage, screenshots, Allure, step definitions,
+   Page/Flow code, and YAML locators. Locators are never changed automatically.
+
+7. Optionally verify collection rollback by changing the Scenario Title in
+   Excel without updating its Python `@scenario` binding, then running
+   `--apply`. Collection should fail with exit `2`, restore the Feature backup,
+   and remove the lock. The workbook remains changed, so `--check` will continue
+   to report drift until the title is corrected.
+
+8. Restore the committed baseline after a disposable drill:
+
+   ```bash
+   git restore data/test_cases.xlsx
+   uv run python scripts/sync_engine.py --apply
+   uv run python scripts/sync_engine.py --check
+   git status --short
+   ```
+
+   Do not use `git restore` for real case edits. In `git status --short`, `M`
+   means a tracked file changed and `??` means an untracked file. `uv.lock` may
+   be created by `uv`; it is a dependency lockfile, not sync-engine output, and
+   should be reviewed and committed separately from case changes.
+
+Command exit codes are `0` for no drift/success, `1` for check-mode drift or a
+changed-case runtime failure, and `2` for validation, collection, lock, or I/O
+errors.
+
 Run Task 14 tests without Appium or a device:
 
 ```bash
