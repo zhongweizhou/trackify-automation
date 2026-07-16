@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
+from selenium.webdriver.support.ui import WebDriverWait
+
 from page.base_page import BasePage
 from utils.locator_loader import Locator, load_locator
 
@@ -79,8 +81,9 @@ class HomePage(BasePage):
         Raises:
             AssertionError: If the panel's accessibility text is unexpected.
         """
+        attribute = "label" if self._platform == "ios" else "content-desc"
         description = self.wait_for(self._loc("monthly_summary")).get_attribute(
-            "content-desc"
+            attribute
         )
         match = _MONTHLY_SUMMARY_PATTERN.search(description or "")
         if not match:
@@ -92,6 +95,19 @@ class HomePage(BasePage):
             income=self._parse_usd(match.group("income")),
             expense=self._parse_usd(match.group("expense")),
             percent=int(match.group("percent")),
+        )
+
+    def wait_for_monthly_summary(
+        self, expected: MonthlySummary, timeout: int | None = None
+    ) -> MonthlySummary:
+        """Wait for the animated This Month values to reach their final state."""
+        wait_timeout = timeout if timeout is not None else self._timeout
+        return WebDriverWait(self._driver, wait_timeout).until(
+            lambda _: (
+                summary
+                if (summary := self.monthly_summary()) == expected
+                else False
+            )
         )
 
     def has_recent_transactions_section(self) -> bool:
@@ -133,6 +149,8 @@ class HomePage(BasePage):
         Returns:
             True when the empty state is visible, otherwise False.
         """
+        if self._platform == "ios":
+            return not self.is_visible(self._loc("recent_transaction_rows"), timeout=1)
         return self.is_visible(self._loc("empty_transactions_message"), timeout=3)
 
     def has_user_name(self, name: str) -> bool:

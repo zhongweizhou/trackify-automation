@@ -4,7 +4,7 @@
 > Device: Android 14 Emulator (Pixel 8) / app-release.apk
 >
 > **Important notes:**
-> 1. ❌ **App has no Budget feature** (confirmed via full-app search)
+> 1. ✅ **App has Monthly budget configuration** during first-run onboarding; the configured budget drives the Home `This Month` progress percentage
 > 2. ⭐ Scope was deliberately narrowed to **Home + Transactions only**
 
 ---
@@ -13,13 +13,14 @@
 
 | # | Page | Entry | Core Interaction | Status |
 |----|------|-------|------------------|--------|
-| 1 | **Home** | Default landing page | Monthly income/expense overview + Add Transaction shortcut + last 7 days Spending visualization + Recent transactions display | ✅ Used |
-| 2 | **Transactions** | Tab | Lists all transaction types (Expense / Income / Transfer); supports search across transactions by note | ✅ Used |
-| 3 | **Add Transaction** | Tab | Add transaction: amount + category (or add new category) + date + note + tags (comma-separated) + photo upload | ✅ Used |
-| 4 | **Analytics** | Tab | Charts (Week / Month / Year) + income/expense statistics + spending by category + Weekly/Monthly/Yearly overview | ✅ Used |
-| 5 | **Settings** | Tab | Preferences (currency, theme, add categories) + Notifications (daily reminder, reminder time, test live alert) + SMS banks reader + Backup & Restore + Security + Data | ✅ Used |
+| 1 | **First-run onboarding** | First app launch after install/data reset | Enter name; select currency; configure Monthly budget; enable Bank SMS Reader; Get Started | ✅ Used |
+| 2 | **Home** | Default landing page | Monthly income/expense overview + budget progress + Add Transaction shortcut + last 7 days Spending visualization + Recent transactions display | ✅ Used |
+| 3 | **Transactions** | Tab | Lists all transaction types (Expense / Income / Transfer); supports search across transactions by note | ✅ Used |
+| 4 | **Add Transaction** | Tab | Add transaction: amount + category (or add new category) + date + note + tags (comma-separated) + photo upload | ✅ Used |
+| 5 | **Analytics** | Tab | Charts (Week / Month / Year) + income/expense statistics + spending by category + Weekly/Monthly/Yearly overview | ✅ Used |
+| 6 | **Settings** | Tab | Preferences (currency, theme, add categories) + Notifications (daily reminder, reminder time, test live alert) + SMS banks reader + Backup & Restore + Security + Data | ✅ Used |
 
-> ✅ **Confirmed**: The current Trackify build has **no Budget feature** (no entry found via Settings / full-app search).
+> ✅ **Confirmed**: Monthly budget is configured during first-run onboarding. The current automation sets it to `30000` and verifies the Home percentage as `expense / budget × 100`, rounded to an integer. Budget is covered as shared setup and a downstream assertion rather than as a standalone management journey.
 
 ---
 
@@ -62,7 +63,7 @@
 |---------|--------|
 | Analytics / charts | Visual-heavy; assertions have low ROI; DOM structure is unstable |
 | Settings | Configuration-focused; low depth of business rules |
-| (was originally Budget Management) | ❌ App has no Budget feature |
+| Budget configuration as a standalone journey | Already covered in first-run setup and Home summary assertions; no separate Budget Management scenario selected |
 
 ---
 
@@ -114,9 +115,11 @@
 
 ---
 
-## Appendix: What Trackify Does NOT Have (worth noting for reviewers)
+## Appendix: Additional Trackify Capabilities / Limits
 
-- ❌ No Budget feature (no setup / target / over-budget warning)
+- ✅ Has Monthly budget configuration in first-run onboarding
+- ✅ Home `This Month` displays progress derived from expense versus budget
+- ⚠️ A separate post-onboarding Budget Management workflow was not selected as a core automation feature
 - ❌ No cloud sync (100% offline / Hive-only)
 - ❌ No multi-currency conversion (only display currency)
 - ✅ Has: SMS banks reader (planned future integration?)

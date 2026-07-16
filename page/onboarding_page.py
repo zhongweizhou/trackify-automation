@@ -76,6 +76,10 @@ class OnboardingPage(BasePage):
         """
         target = self._parse_budget(monthly_budget)
         current = self.monthly_budget()
+        if self._platform == "ios":
+            self._set_ios_monthly_budget(target)
+            return
+
         stagnant_adjustments = 0
 
         for _ in range(MAX_BUDGET_ADJUSTMENTS):
@@ -105,11 +109,25 @@ class OnboardingPage(BasePage):
             f"Monthly budget did not reach {target}; current value is {current}."
         )
 
+    def _set_ios_monthly_budget(self, target: int) -> None:
+        slider = self.wait_for(self._loc("budget_slider"))
+        center_y = slider.location["y"] + slider.size["height"] / 2
+        # Flutter exposes only the adjustable thumb, so map the app's 1000-unit
+        # budget steps onto the rendered iPhone 17 track and verify the result.
+        track_start_x = slider.location["x"] + slider.size["width"] * 0.255
+        target_x = track_start_x + target / 2000
+        self._tap_point(target_x, center_y)
+
+        actual = self.monthly_budget()
+        if actual != target:
+            raise AssertionError(
+                f"Monthly budget did not reach {target}; current value is {actual}."
+            )
+
     def monthly_budget(self) -> int:
         """Return the monthly budget currently displayed on the setup page."""
-        description = self.wait_for(self._loc("budget_page")).get_attribute(
-            "content-desc"
-        )
+        attribute = "label" if self._platform == "ios" else "content-desc"
+        description = self.wait_for(self._loc("budget_page")).get_attribute(attribute)
         match = re.search(r"Monthly Budget\s+\D*([\d,]+)", description or "")
         if not match:
             raise AssertionError(
@@ -129,19 +147,20 @@ class OnboardingPage(BasePage):
             self._tap_locator(self._loc("bank_sms_reader_switch"))
 
         by_locator = self._to_appium_locator(self._loc("bank_sms_reader_switch"))
+        attribute = "value" if self._platform == "ios" else "checked"
         WebDriverWait(self._driver, self._timeout).until(
             lambda driver: str(
-                driver.find_element(*by_locator).get_attribute("checked")
+                driver.find_element(*by_locator).get_attribute(attribute)
             ).lower()
-            == "true"
+            in {"true", "1"}
         )
 
     def is_bank_sms_reader_enabled(self) -> bool:
         """Return whether the Bank SMS Reader switch is checked."""
-        checked = self.wait_for(
-            self._loc("bank_sms_reader_switch")
-        ).get_attribute("checked")
-        return str(checked).lower() == "true"
+        switch = self.wait_for(self._loc("bank_sms_reader_switch"))
+        attribute = "value" if self._platform == "ios" else "checked"
+        checked = switch.get_attribute(attribute)
+        return str(checked).lower() in {"true", "1"}
 
     def tap_get_started(self) -> None:
         """Finish onboarding and leave the setup flow."""
@@ -162,8 +181,9 @@ class OnboardingPage(BasePage):
         except WebDriverException:
             element.click()
 
-    def _tap_point(self, x: int, y: int) -> None:
-        self._driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
+    def _tap_point(self, x: int | float, y: int | float) -> None:
+        command = "mobile: tap" if self._platform == "ios" else "mobile: clickGesture"
+        self._driver.execute_script(command, {"x": x, "y": y})
 
     def _hide_keyboard_if_present(self) -> None:
         try:

@@ -76,7 +76,8 @@ reliable.
 
 - The suite is serial and shares one Appium session.
 - Full package reset makes each scenario slower than a targeted state fixture.
-- iOS locator entries are architectural placeholders, not device-validated.
+- iOS locators and all seven scenarios are validated on an iPhone 17 simulator
+  running iOS 26.5; other device profiles and locale settings remain unverified.
 - Photo attachment and broader Settings/Analytics behavior are outside the
   seven-scenario scope.
 - GitHub-hosted E2E requires an externally downloadable APK through the

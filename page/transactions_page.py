@@ -71,7 +71,7 @@ class TransactionsPage(BasePage):
             descriptions = tuple(
                 description
                 for element in driver.find_elements(*locator)
-                if (description := element.get_attribute("content-desc"))
+                if (description := element.get_attribute(self._description_attribute))
             )
             if descriptions and predicate(descriptions):
                 return descriptions
@@ -90,7 +90,7 @@ class TransactionsPage(BasePage):
         """
         description = self.wait_for(
             self._loc("date_section", date_label=date_label)
-        ).get_attribute("content-desc")
+        ).get_attribute(self._description_attribute)
         if not description:
             raise AssertionError(f"Date section {date_label!r} is empty.")
         return description
@@ -103,7 +103,7 @@ class TransactionsPage(BasePage):
             descriptions = tuple(
                 description
                 for element in driver.find_elements(*locator)
-                if (description := element.get_attribute("content-desc"))
+                if (description := element.get_attribute(self._description_attribute))
             )
             return descriptions or False
 
@@ -146,6 +146,13 @@ class TransactionsPage(BasePage):
 
     def click_home(self) -> None:
         """Return to Home using the bottom navigation tab."""
+        if self._platform == "ios":
+            window = self._driver.get_window_size()
+            self._driver.execute_script(
+                "mobile: tap",
+                {"x": window["width"] * 0.14, "y": window["height"] * 0.94},
+            )
+            return
         self.click(self._loc("home_tab_from_transactions"))
 
     def _loc(self, key: str, **format_values: str) -> Locator:
@@ -153,3 +160,7 @@ class TransactionsPage(BasePage):
         if format_values:
             value = value.format(**format_values)
         return strategy, value
+
+    @property
+    def _description_attribute(self) -> str:
+        return "label" if self._platform == "ios" else "content-desc"

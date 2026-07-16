@@ -56,6 +56,10 @@ class AppiumDriverFactory:
             capabilities["appPackage"] = self._config.android_package
         if self._config.android_activity:
             capabilities["appActivity"] = self._config.android_activity
+        if self._config.device_udid:
+            capabilities["udid"] = self._config.device_udid
+        if self._config.system_port is not None:
+            capabilities["systemPort"] = self._config.system_port
         return UiAutomator2Options().load_capabilities(capabilities)
 
     def _ios_options(self) -> XCUITestOptions:
@@ -67,4 +71,12 @@ class AppiumDriverFactory:
             "newCommandTimeout": 120,
             "noReset": False,
         }
+        if self._config.device_udid:
+            capabilities["udid"] = self._config.device_udid
+        if self._config.wda_local_port is not None:
+            capabilities["wdaLocalPort"] = self._config.wda_local_port
+        if self._config.mjpeg_server_port is not None:
+            capabilities["mjpegServerPort"] = self._config.mjpeg_server_port
+        if self._config.derived_data_path is not None:
+            capabilities["derivedDataPath"] = str(self._config.derived_data_path)
         return XCUITestOptions().load_capabilities(capabilities)
