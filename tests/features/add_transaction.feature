@@ -7,6 +7,9 @@ Feature: Add Transaction
     And user enables Bank SMS Reader and gets started
     And user is on the Home page
 
+# scenario_id: TC_ADD_TX_001
+# introduced_in: 1.0.0
+# platforms: android, ios
   @smoke @p0
   Scenario: Add expense happy path
     When user taps "Add Expense"
@@ -19,6 +22,9 @@ Feature: Add Transaction
     And Transactions shows the saved transaction with matching date, amount, category, and time
     And This Month summary is correct for budget "30000"
 
+# scenario_id: TC_ADD_TX_002
+# introduced_in: 1.0.0
+# platforms: android, ios
   @smoke @p0
   Scenario: Add income happy path
     When user taps "Add Income"
@@ -30,6 +36,9 @@ Feature: Add Transaction
     And Transactions shows the saved transaction with matching date, amount, category, and time
     And This Month summary is correct for budget "30000"
 
+# scenario_id: TC_ADD_TX_003
+# introduced_in: 1.0.0
+# platforms: android, ios
   @smoke @p0
   Scenario: Add transfer happy path
     When user taps "Add Transfer"
@@ -41,6 +50,9 @@ Feature: Add Transaction
     And Transactions shows the saved transaction with matching date, amount, category, and time
     And This Month summary is correct for budget "30000"
 
+# scenario_id: TC_ADD_TX_004
+# introduced_in: 1.0.0
+# platforms: android, ios
   @smoke @p0
   Scenario: Validation — empty amount shows error and does not save
     When user taps "Add Expense"
@@ -52,6 +64,9 @@ Feature: Add Transaction
     And Transactions contains no transactions
     And This Month summary is correct for budget "30000"
 
+# scenario_id: TC_ADD_TX_005
+# introduced_in: 1.0.0
+# platforms: android, ios
   @p1 @custom_category
   Scenario: Add expense with new custom category created in flow
     When user taps "Add Expense"

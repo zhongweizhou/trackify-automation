@@ -40,6 +40,12 @@ jobs:
       - name: Test AI failure triage
         run: uv run pytest -m unit tests/unit/test_triage.py -q
 
+      - name: Test Excel-to-Gherkin sync
+        run: uv run pytest -m unit tests/unit/test_sync_engine.py -q
+
+      - name: Check test-case registry drift
+        run: uv run python scripts/sync_engine.py --check
+
       - name: Collect BDD scenarios
         run: uv run pytest -m "not unit" --collect-only -q
 

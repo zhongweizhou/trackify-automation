@@ -1,38 +1,41 @@
-# Scaling Trackify Automation — Strategic Roadmap
+# Scaling Trackify Automation — Implemented Foundation and Roadmap
 
-> **Status**: aspirational / long-term. NOT required for the 4-6h challenge.
-> **Audience**: future-you, evaluators, Codex when picking up Day 5+ work.
-> **Pair**: TECHNICAL_SPEC.md §11 (concise, implementer-facing) — this file is the full design context.
+> **Status**: Task 14's local Excel-to-Gherkin foundation is implemented. Version-aware
+> selection, a shared test-management service, and bidirectional result sync remain roadmap.
+> **Pair**: TECHNICAL_SPEC.md §11 is the normative implementation contract; this file
+> explains the broader scaling context.
 
 ---
 
-## Q1 — How top internet companies manage BDD suites
+## Q1 — What can be verified about mature test organizations
 
-### Industry snapshot (2026)
+Exact internal test platforms and operating rules at individual companies are generally
+not public enough to support a reliable company-by-company comparison. The defensible
+comparison is between published product capabilities and open specifications:
 
-| Company | Framework | Core practice |
-|---------|-----------|---------------|
-| Google | Internal ATF (not Gherkin) | Test impact analysis — only run tests touching changed code |
-| Microsoft | SpecFlow (.NET) | `.feature` co-located with product code; per-team ownership |
-| Amazon | Device Farm + internal | "Two-pizza team" owns feature file; weekly archive sweep |
-| Spotify | Cucumber / Hiptest | Dedicated Quality Coach role; cross-team scenario reuse |
-| Tencent (WeTest) | Internal BDD | Central QA platform; bidirectional sync between case library and `.feature` |
-| Alibaba (TMQ) | Internal BDD | Per-BU isolation; layered tags (`@L0`/`@L1`/`@L2`) |
-| Uber | Mixed (custom + Gherkin) | One `.feature` set per app; critical user journey split into micro-scenarios |
-| ByteDance | Internal ByteBDD | 10+ dimensional tag taxonomy (module / priority / platform / version / owner) |
+| Public source | Verifiable capability | Design implication |
+|---------------|-----------------------|--------------------|
+| [Azure Test Plans: associate automated tests](https://learn.microsoft.com/en-us/azure/devops/test/associate-automated-test-with-test-case?view=azure-devops) | Links automated tests to managed test cases for traceability and pipeline execution | Keep a stable case ID between registry metadata and executable code |
+| [Azure Pipelines: Test Impact Analysis](https://learn.microsoft.com/en-us/azure/devops/pipelines/test/test-impact-analysis?view=azure-devops) | Selects the subset of tests required for a code change | Run impacted cases plus a small safety suite instead of every case on every commit |
+| [Cucumber Gherkin reference](https://cucumber.io/docs/gherkin/reference) | Defines structured, executable specifications in a business-readable language | Keep Gherkin readable and treat the step vocabulary as an executable contract |
 
-### Consensus patterns
+### Common mature-system pattern
 
-1. **`.feature` lives in the product repo** (or a sibling test repo), not in a separate system.
-2. **Each `.feature` ≤ 200 scenarios** — over the limit, split by sub-module.
-3. **Regular archiving**: 6 months inactive → `@deprecated`; 12 months → delete.
-4. **Tag ≥ 3 dimensions**: priority × platform × frequency (`smoke` / `regression` / `nightly`).
-5. **Each scenario has an owner**: `# @owner: payments-team` in the file header; CI failure pings the owner.
-6. **`.feature` rides the same PR review as product code** — never allowed for QA to land `.feature` solo.
+1. A test-management system owns planning metadata, history, permissions, and audit.
+2. Executable automation stays versioned with code and is changed through review.
+3. Stable case IDs provide traceability across those two systems.
+4. CI runs smoke coverage plus a risk- or change-selected subset, then broader scheduled regression.
+5. Results flow back to a dashboard or test-management API with environment and device identity.
+6. Locator and implementation changes remain engineer-reviewed because blind self-healing can hide product defects.
 
 ### Trackify mapping
 
-TECHNICAL_SPEC.md §6.4 markers + §6.7 scenario inventory already cover priority × platform × frequency. **Missing dimensions** (filled in §11): owner + version metadata + automation status. See Q2 / Q5 below.
+Task 14 implements the same boundaries at local-project scale: Excel holds planning
+metadata, stable IDs bind rows to code-owned scenarios, CI rejects drift, and
+`--run-changed` executes the changed subset. Excel is a practical bootstrap and
+authoring format, not the recommended concurrent database for many teams. When
+permissions, audit history, webhooks, and concurrent editing become requirements,
+replace it with a test-management API while retaining the IDs and one-way adapter.
 
 ---
 
@@ -154,7 +157,9 @@ def diff(excel_rows, feature_scenarios):
 
 ### Trackify mapping
 
-Excel is the **single source of truth** for `data/test_cases.xlsx`. The sync_engine writes `.feature` files but never overwrites without diff. Day 5+ work; not in the 4-6h challenge.
+Excel is the **single source of truth** for the managed fields in
+`data/test_cases.xlsx`. The implemented sync engine validates the complete workbook,
+shows a scenario-level diff, and updates only changed managed blocks.
 
 ---
 
@@ -307,7 +312,7 @@ Linked User Story (JIRA URL), Linked Bug Tickets, Automation PR, Risk Score, Ste
 | Untouched scenarios must be byte-identical after the run | Reviewer trust — sync doesn't accidentally reformat |
 | Single xlsx file (no merge across files) | Day 6+ problem |
 | One-shot CLI mode AND `--watch` mode | Local dev experience |
-| `--dry-run` flag | Pre-merge sanity check |
+| `--check` mode | Pre-merge validation and drift detection with zero writes |
 
 ### Deferred (Day 6+, explicitly out of PoC)
 
@@ -355,14 +360,14 @@ Linked User Story (JIRA URL), Linked Bug Tickets, Automation PR, Risk Score, Ste
 
 ---
 
-## Trackify 4-6h challenge: what's in vs out
+## Delivered foundation vs deferred scale work
 
-| In (Tasks 1-12) | Out (Tasks 13-14, this roadmap) |
-|-----------------|--------------------------------|
-| 7 `.feature` scenarios (§6.7) | sync_engine PoC (Q6) |
-| Page + Flow + Driver framework | Excel schema registry (Q5) |
-| Allure + screenshot on fail | Version-aware selection (Q2) |
-| pytest markers + BDD | AI case gen from screenshots (Q4) |
-| iOS extension plan (README) | Bidirectional sync |
+| Delivered | Deferred until scale requires it |
+|-----------|----------------------------------|
+| 7 cross-platform `.feature` scenarios | Version- and code-impact-aware selection |
+| Page + Flow + Driver framework | Shared test-management database/API |
+| Allure, screenshots, and Task 13 failure triage | Bidirectional result synchronization |
+| Concurrent Android + iOS device matrix | Cloud device-farm orchestration |
+| Task 14 Excel registry, incremental sync, rollback, and changed-case execution | Multi-writer conflict resolution and approval workflows |
 
-Day 5+ work lands here. The TECHNICAL_SPEC.md §11 plus this file give Codex enough context to pick up Tasks 13-14 without re-deriving the design.
+TECHNICAL_SPEC.md §11 remains the source of truth for Task 14's shipped behavior.

@@ -33,10 +33,11 @@
 | Appium 端口隔离 | 为 Android `systemPort`、iOS WDA/MJPEG 端口和 derived-data 目录分配唯一值 |
 | 可追溯报告 | 记录环境、平台、设备、系统版本、UDID、逐用例结果、JUnit、日志、截图和合并 Allure |
 | 失败智能归因 | 首个失败阶段先使用确定性本地签名分类，歧义失败仅在显式开启后调用 Claude fallback |
+| Excel 活用例库 | 经过校验的用例表只增量更新受管 Gherkin 块，保持未变化字节，并可只执行变化场景 |
 | 可评审过程 | 技术规格明确分层规则、验收标准、反模式和按任务拆分的提交纪律 |
 
-AI 失败归因已经实现。技术规格中的 Excel → Gherkin 同步仍属于后续扩展
-契约，本文不把它描述为当前已经交付的运行时能力。
+AI 失败归因和 Excel → Gherkin 同步都已经实现。同步边界只到受管 Scenario：
+Step、Page、Flow 和 Locator 仍由代码维护。
 
 ---
 
@@ -230,6 +231,15 @@ uv run pytest -m "not unit" --collect-only -q
 
 # 不需要 Appium/设备/网络，验证 Task 13 失败归因
 uv run pytest -m unit tests/unit/test_triage.py -q
+
+# 不需要 Appium/设备，验证 Task 14 增量同步和回滚
+uv run pytest -m unit tests/unit/test_sync_engine.py -q
+
+# 检查 Excel 与 Feature 是否存在 drift，不写文件
+uv run python scripts/sync_engine.py --check
+
+# 增量更新并只执行变化用例
+uv run python scripts/sync_engine.py --apply --run-changed
 ```
 
 ### 2. 单设备完整执行
@@ -483,6 +493,49 @@ HTTP 错误或响应不合法时都安全降级为 `Unknown`。
 uv run pytest -m unit tests/unit/test_triage.py -q
 ```
 
+## Excel 管理的 BDD 同步
+
+[`data/test_cases.xlsx`](data/test_cases.xlsx) 已将现有 7 条用例整理成 16 列的
+可维护用例库。Excel 负责元数据及受管 `Scenario` 的动作和断言；Feature 的
+标题、注释和 `Background` 仍由代码维护。Step Definition、Page、Flow、测试
+数据和 YAML Locator 不会被同步引擎生成或覆盖。
+
+```bash
+# 校验 schema 并显示 added/modified/deprecated/unchanged，不写文件
+uv run python scripts/sync_engine.py --check
+
+# 只应用通过全量校验的 Scenario 变化，并执行 pytest collection
+uv run python scripts/sync_engine.py --apply
+
+# 应用后只执行新增/修改的 active 场景
+uv run python scripts/sync_engine.py --apply --run-changed
+
+# 本地监听，连续写入停止 5 秒后触发
+uv run python scripts/sync_engine.py --watch --apply
+```
+
+引擎会在第一次写入前校验完整工作簿和两个 Feature，并使用 Module 白名单、
+稳定 `scenario_id`、带微秒的备份、同目录临时文件、`os.replace` 和并发锁。
+写入后的 pytest collection 失败时，会恢复本次修改的全部 Feature。未变化的
+受管块直接复用原始文本切片，即使相邻场景新增、修改或弃用也保持字节一致。
+
+`--run-changed` 用于针对性的实现和调试：通过时返回变化用例数量和 Allure
+路径；运行失败时保留已经通过 collection 的 Feature 变更，通过 Task 13、
+失败截图和 Allure 提供诊断，并打印准确的 pytest 重试命令，提示检查 Step、
+Page/Flow 和 YAML Locator。如果新增 Gherkin 词汇还没有 Step 实现，collection
+会失败并回滚 Feature，然后明确反馈缺少的实现。
+
+同步引擎不会猜测或自动修复 Locator。定位器必须根据 Appium 页面结构和截图
+证据修改并接受代码评审，否则“自愈”很容易掩盖产品缺陷。引擎也不会写回
+Excel；删除一行不代表删除用例，需要使用 `Automation Status=deprecated` 和
+明确的弃用版本。
+
+无需 Appium 或设备即可执行 Task 14 单元测试：
+
+```bash
+uv run pytest -m unit tests/unit/test_sync_engine.py -q
+```
+
 ## 测试覆盖
 
 | 功能 | P0 | P1 | 合计 | 覆盖内容 |
@@ -557,7 +610,8 @@ appium
 `.github/workflows/ci.yml` 提供两层校验：
 
 - push 到 `test`、Pull Request 和手动触发时，安装依赖、运行无需设备的矩阵
-  分片与失败归因单元测试，并收集全部 7 个 BDD 场景；
+  分片、失败归因和同步单元测试，拒绝 Excel drift，并收集全部 7 个 BDD
+  场景；
 - 配置 `TRACKIFY_APK_URL` 后，在 Android API 34 模拟器中执行完整 E2E；
 - 上传 Allure 原始结果、HTML 报告、失败截图和 Appium 日志；
 - 未配置 APK secret 时只跳过移动 E2E，测试收集仍然作为合并门禁。
