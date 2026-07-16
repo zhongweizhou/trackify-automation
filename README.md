@@ -32,11 +32,12 @@ state, cross-platform execution, and attributable reports.
 | Multi-device concurrency | One command discovers all ready Android and iOS targets, then either replicates or shards the suite across isolated workers |
 | Collision-free Appium sessions | Unique Android `systemPort`, iOS WDA/MJPEG ports, and WDA derived-data paths per device |
 | Traceable reporting | Environment, platform, device, OS version, UDID, per-case result, JUnit, logs, screenshots, and merged Allure results |
+| Advisory failure triage | Deterministic local signatures classify the first failed phase; an explicitly enabled Claude fallback handles ambiguous failures |
 | Reviewable engineering process | The technical specification defines layer rules, acceptance criteria, anti-patterns, and task-sized commits |
 
-The optional AI failure triage and Excel-to-Gherkin synchronization described
-in the technical specification are extension contracts, not claims about the
-currently shipped runtime.
+AI failure triage is implemented. The Excel-to-Gherkin synchronization described
+in the technical specification remains an extension contract, not a claim about
+the currently shipped runtime.
 
 ---
 
@@ -248,11 +249,12 @@ test suite. Detailed examples follow it.
 
 | Category | Command | Purpose |
 |---|---|---|
-| Validate collection | `uv run pytest --collect-only -q` | Parse imports, Gherkin, steps, and markers without opening an Appium session |
+| Validate BDD collection | `uv run pytest -m "not unit" --collect-only -q` | Parse the 7 mobile scenarios without opening an Appium session |
 | Matrix unit tests | `.venv/bin/python -m unittest discover -s unit_tests -v` | Validate device sharding without Appium or a mobile device |
-| Default single device | `uv run pytest` | Run all 7 scenarios on the default Android target |
-| Explicit Android device | `PLATFORM=android DEVICE_UDID=<udid> APP_PATH="$PWD/app/app-release.apk" uv run pytest` | Run all scenarios on one Android emulator or physical device |
-| Explicit iOS simulator | `PLATFORM=ios DEVICE_UDID=<udid> APP_PATH="$PWD/app/Runner.app" uv run pytest` | Run all scenarios on one booted iOS simulator |
+| Triage unit tests | `uv run pytest -m unit tests/unit/test_triage.py -q` | Validate Task 13 without Appium, devices, or network calls |
+| Default single device | `uv run pytest -m "not unit"` | Run all 7 scenarios on the default Android target |
+| Explicit Android device | `PLATFORM=android DEVICE_UDID=<udid> APP_PATH="$PWD/app/app-release.apk" uv run pytest -m "not unit"` | Run all scenarios on one Android emulator or physical device |
+| Explicit iOS simulator | `PLATFORM=ios DEVICE_UDID=<udid> APP_PATH="$PWD/app/Runner.app" uv run pytest -m "not unit"` | Run all scenarios on one booted iOS simulator |
 | Feature | `uv run pytest tests/features/add_transaction.feature -q` | Run one feature file (5 Add Transaction scenarios) |
 | Marker | `uv run pytest -m smoke -q` | Run a priority or functional subset |
 | Scenario | `uv run pytest -k "add_expense_happy_path" -q` | Run one generated pytest scenario name |
@@ -262,8 +264,8 @@ test suite. Detailed examples follow it.
 | iOS matrix | `.venv/bin/python scripts/run_device_matrix.py --platform ios --env preprod` | Run all booted iOS simulators and paired iOS devices concurrently |
 | Selected devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod --device <udid-1> --device <udid-2>` | Run only the listed devices; repeat `--device` as needed |
 | Matrix subset | `.venv/bin/python scripts/run_device_matrix.py --env preprod -- -m smoke` | Forward pytest arguments after `--` to every device worker |
-| Reported run | `uv run pytest --alluredir=./allure-results --clean-alluredir` | Produce Allure raw results for a single-device run |
-| Failure/debug | `uv run pytest -x -s -vv` | Stop on the first failure and show uncaptured diagnostic output |
+| Reported run | `uv run pytest -m "not unit" --alluredir=./allure-results --clean-alluredir` | Produce Allure raw results for a single-device run |
+| Failure/debug | `uv run pytest -m "not unit" -x -s -vv` | Stop on the first failure and show uncaptured diagnostic output |
 
 Use `.venv/bin/python -m pytest` instead of `uv run pytest` in any row when
 `uv` is unavailable. Start Appium before any command that executes UI tests.
@@ -272,10 +274,10 @@ Use `.venv/bin/python -m pytest` instead of `uv run pytest` in any row when
 
 ```bash
 # Run all 7 BDD scenarios
-uv run pytest
+uv run pytest -m "not unit"
 
 # Concise output
-uv run pytest -q
+uv run pytest -m "not unit" -q
 ```
 
 #### By feature
@@ -336,13 +338,14 @@ This validates imports, Gherkin parsing, markers, and step matching without
 starting Appium or executing a scenario:
 
 ```bash
-uv run pytest --collect-only -q
+uv run pytest -m "not unit" --collect-only -q
 ```
 
 #### Allure results and failure screenshots
 
 ```bash
 uv run pytest \
+  -m "not unit" \
   --alluredir=./allure-results \
   --clean-alluredir
 
@@ -361,16 +364,16 @@ Call-stage failures automatically save PNG evidence under
 
 ```bash
 # Stop on the first failure
-uv run pytest -x -vv
+uv run pytest -m "not unit" -x -vv
 
 # Stop after one failure
-uv run pytest --maxfail=1 -vv
+uv run pytest -m "not unit" --maxfail=1 -vv
 
 # Rerun only failures from the previous pytest run
-uv run pytest --lf -vv
+uv run pytest -m "not unit" --lf -vv
 
 # Disable output capture while debugging
-uv run pytest -s -vv
+uv run pytest -m "not unit" -s -vv
 ```
 
 #### Override the local Appium target
@@ -383,7 +386,7 @@ PLATFORM=android \
 APP_PATH="$PWD/app/app-release.apk" \
 DEVICE_NAME="Android Emulator" \
 APPIUM_SERVER_URL="http://127.0.0.1:4723" \
-uv run pytest
+uv run pytest -m "not unit"
 ```
 
 #### Run on every connected device
@@ -561,7 +564,9 @@ trackify-automation/
 │   │   ├── add_transaction.feature # Five Add Transaction scenarios
 │   │   └── transactions.feature    # Filter and grouping scenarios
 │   ├── step_defs/                  # pytest-bdd step implementations
+│   ├── unit/test_triage.py         # Device-free Task 13 coverage
 │   └── __init__.py
+├── ai/triage.py                    # Local + optional Claude failure triage
 ├── unit_tests/                     # Device-free matrix sharding tests
 ├── locator/
 │   ├── onboarding.yaml
@@ -650,10 +655,51 @@ of truth:
 | Locator analysis | Interpreted Appium XML and screenshots to suggest stable selectors | Exercised every selector on the Android emulator |
 | Implementation | Drafted Page, Flow, fixture, and reporting changes | Reviewed diffs and ran focused plus full regression tests |
 | Debugging | Formed hypotheses for keyboard, category, date picker, and transition failures | Accepted changes only after reproducing and rerunning the failing path |
+| Failure triage | Implemented bounded local signatures and an opt-in Claude fallback | Verified every category, privacy rule, fallback failure, and controlled pytest failure |
 | Documentation | Structured architecture and reflection material | Reconciled every claim with the repository and latest run |
 
 AI shortened investigation time, but live Appium behavior overruled generated
 assumptions whenever they disagreed.
+
+---
+
+## AI Failure Triage
+
+The first failed pytest phase (`setup`, `call`, or `teardown`) receives one
+advisory triage result. The verdict never changes the pytest outcome, hides the
+original traceback, retries a test, or files a bug automatically.
+
+```text
+[AI Triage] Locator (98%): Matched local failure signature 'element_missing'.
+```
+
+The always-on local stage uses deterministic signatures for `Locator`,
+`App Bug`, `Env`, `Script`, and `Data`. Weak or unknown signals return
+`Unknown`; confidences are never added together. Results are attached to Allure
+as `AI Triage` JSON with the schema version, test, failing phase, category,
+confidence, reasoning, next action, classifier, and matched signature IDs.
+
+Claude fallback is disabled by default. Enable it only when all three variables
+are intentionally configured:
+
+```bash
+export AI_TRIAGE_LLM_ENABLED=1
+export ANTHROPIC_API_KEY="<key>"
+export ANTHROPIC_MODEL="<model>"
+```
+
+The fallback is attempted only below `0.70` local confidence. It uses one
+standard-library HTTP request, no retry, and a five-second timeout. Failure text
+is bounded and redacted before network use; authorization values, tokens, API
+keys, and URL queries are removed. Screenshots are never uploaded: only an
+availability flag and basename may enter the prompt. Any missing configuration,
+timeout, HTTP error, or invalid response safely returns `Unknown`.
+
+Run all Task 13 tests without Appium, a device, or network access:
+
+```bash
+uv run pytest -m unit tests/unit/test_triage.py -q
+```
 
 ---
 
@@ -673,7 +719,7 @@ Add Transaction: 5 passed
 Transactions:    2 passed
 ```
 
-Command: `uv run pytest --alluredir=./allure-results`
+Command: `uv run pytest -m "not unit" --alluredir=./allure-results`
 
 ---
 
@@ -714,7 +760,7 @@ Command: `uv run pytest --alluredir=./allure-results`
    PLATFORM=ios \
    APP_PATH="$PWD/app/Runner.app" \
    DEVICE_NAME="iPhone 16" \
-   uv run pytest
+   uv run pytest -m "not unit"
    ```
 6. **Adapt native picker and back-navigation mechanics inside Pages only**
 
@@ -738,8 +784,8 @@ simulator profile, locale, or 12/24-hour time setting.
 The workflow at `.github/workflows/ci.yml` has two levels:
 
 - Every push to `test`, pull request, and manual dispatch installs dependencies,
-  runs device-free matrix distribution unit tests, and collects all seven BDD
-  scenarios.
+  runs device-free matrix distribution and failure-triage unit tests, and
+  collects all seven BDD scenarios.
 - Full Android E2E requires a repository secret named `TRACKIFY_APK_URL` that
   points to a downloadable APK. This is necessary because the app binary is not
   committed.

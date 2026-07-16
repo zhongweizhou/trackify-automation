@@ -32,10 +32,11 @@
 | 多设备并发 | 一个命令发现全部可用 Android/iOS 设备，并通过独立 pytest 进程选择全量复制或用例分片 |
 | Appium 端口隔离 | 为 Android `systemPort`、iOS WDA/MJPEG 端口和 derived-data 目录分配唯一值 |
 | 可追溯报告 | 记录环境、平台、设备、系统版本、UDID、逐用例结果、JUnit、日志、截图和合并 Allure |
+| 失败智能归因 | 首个失败阶段先使用确定性本地签名分类，歧义失败仅在显式开启后调用 Claude fallback |
 | 可评审过程 | 技术规格明确分层规则、验收标准、反模式和按任务拆分的提交纪律 |
 
-技术规格中的 AI 失败归因和 Excel → Gherkin 同步属于后续扩展契约，本文不把
-它们描述为当前已经交付的运行时能力。
+AI 失败归因已经实现。技术规格中的 Excel → Gherkin 同步仍属于后续扩展
+契约，本文不把它描述为当前已经交付的运行时能力。
 
 ---
 
@@ -222,31 +223,34 @@ Page 和 YAML Locator 层。
 
 ```bash
 # 只校验 Python 导入、Gherkin、步骤绑定和 marker，不启动 Appium
-uv run pytest --collect-only -q
+uv run pytest -m "not unit" --collect-only -q
 
 # 不需要 Appium/设备，验证矩阵分片算法
 .venv/bin/python -m unittest discover -s unit_tests -v
+
+# 不需要 Appium/设备/网络，验证 Task 13 失败归因
+uv run pytest -m unit tests/unit/test_triage.py -q
 ```
 
 ### 2. 单设备完整执行
 
 ```bash
 # 默认 Android 设备，执行全部 7 个场景
-uv run pytest
+uv run pytest -m "not unit"
 
 # 指定一台 Android 设备
 PLATFORM=android \
 DEVICE_UDID=emulator-5554 \
 DEVICE_NAME="Android Emulator" \
 APP_PATH="$PWD/app/app-release.apk" \
-uv run pytest
+uv run pytest -m "not unit"
 
 # 指定一台 iOS 模拟器
 PLATFORM=ios \
 DEVICE_UDID=BFE1DE67-0F95-47B7-A02A-D25EE83CD999 \
 DEVICE_NAME="iPhone 17" \
 APP_PATH="$PWD/app/Runner.app" \
-uv run pytest
+uv run pytest -m "not unit"
 ```
 
 ### 3. 按 Feature 执行
@@ -359,6 +363,7 @@ transactions_grouped_by_date_with_section_headers
 
 ```bash
 uv run pytest \
+  -m "not unit" \
   --alluredir=./allure-results \
   --clean-alluredir
 
@@ -374,13 +379,13 @@ open ./allure-report/index.html
 
 ```bash
 # 第一次失败立即停止
-uv run pytest -x -vv
+uv run pytest -m "not unit" -x -vv
 
 # 只重新执行上次失败的用例
-uv run pytest --lf -vv
+uv run pytest -m "not unit" --lf -vv
 
 # 调试时关闭输出捕获
-uv run pytest -s -vv
+uv run pytest -m "not unit" -s -vv
 ```
 
 ## 多设备能力亮点
@@ -443,6 +448,40 @@ report/device-matrix/<环境>/<时间戳>/
   不被包装或吞掉；
 - **实现纪律**：每个任务都有文件范围、验收标准、测试门槛和对应提交，便于
   评审及回溯。
+
+## AI 失败归因
+
+pytest 的首个失败阶段（`setup`、`call` 或 `teardown`）会生成一次建议性质
+的归因结果。该结果不会改变 pytest 状态、隐藏原始 traceback、自动重试或
+自动提交缺陷。
+
+```text
+[AI Triage] Locator (98%): Matched local failure signature 'element_missing'.
+```
+
+始终开启的本地阶段使用确定性签名识别 `Locator`、`App Bug`、`Env`、
+`Script` 和 `Data`。弱信号不会累加置信度，无法可靠判断时返回 `Unknown`。
+Allure 中会附加名为 `AI Triage` 的 JSON，包含 schema 版本、测试名称、失败
+阶段、分类、置信度、原因、建议动作、分类器和命中的本地签名 ID。
+
+Claude fallback 默认关闭。只有主动配置以下三个变量时才会启用：
+
+```bash
+export AI_TRIAGE_LLM_ENABLED=1
+export ANTHROPIC_API_KEY="<key>"
+export ANTHROPIC_MODEL="<model>"
+```
+
+只有本地置信度低于 `0.70` 时才允许一次请求，不重试，总超时 5 秒。错误文本
+在网络调用前会被截断和脱敏，Authorization、Token、API Key 和 URL query
+都会移除。截图不会上传，只允许传入“是否存在”和文件名。配置缺失、超时、
+HTTP 错误或响应不合法时都安全降级为 `Unknown`。
+
+无需 Appium、设备或网络即可执行完整 Task 13 测试：
+
+```bash
+uv run pytest -m unit tests/unit/test_triage.py -q
+```
 
 ## 测试覆盖
 
@@ -518,7 +557,7 @@ appium
 `.github/workflows/ci.yml` 提供两层校验：
 
 - push 到 `test`、Pull Request 和手动触发时，安装依赖、运行无需设备的矩阵
-  分片单元测试，并收集全部 7 个 BDD 场景；
+  分片与失败归因单元测试，并收集全部 7 个 BDD 场景；
 - 配置 `TRACKIFY_APK_URL` 后，在 Android API 34 模拟器中执行完整 E2E；
 - 上传 Allure 原始结果、HTML 报告、失败截图和 Appium 日志；
 - 未配置 APK secret 时只跳过移动 E2E，测试收集仍然作为合并门禁。
