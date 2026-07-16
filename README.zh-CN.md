@@ -41,6 +41,42 @@ Step、Page、Flow 和 Locator 仍由代码维护。
 
 ---
 
+## 功能演示视频
+
+### Android/iOS 并发分片执行 smoke 子集
+
+```bash
+.venv/bin/python scripts/run_device_matrix.py \
+  --distribution split \
+  --env preprod \
+  -- \
+  -m smoke
+```
+
+视频展示 pytest marker 参数透传、Android/iOS 自动发现、多设备并发、Appium
+会话端口隔离，以及合并后的 Allure 报告。由于命令使用 `split`，选中的 smoke
+用例会分配到全部可用设备，每条用例在本次矩阵中只执行一次；如果要求每台
+设备都执行每条选中用例，应使用默认的 `replicate` 模式。
+
+[在 Bilibili 观看 smoke 多设备矩阵演示](https://www.bilibili.com/video/BV17QKG6mEWW)
+
+### Excel 驱动的增量执行与故意断言失败
+
+```bash
+./scripts/run_changed_matrix.sh
+```
+
+视频先展示一个 BDD Scenario，再根据稳定用例 ID 在 Excel 中找到对应行，只
+修改操作步骤中的 amount，故意保持 Expected Result 不变。一键健康门禁只识别
+这条 modified 用例，同步对应的受管 Feature 块，在已发现的 Android 和 iOS
+设备上复制执行，并在 Allure 中展示失败用例及断言原因。视频中的失败是刻意
+制造的，用于证明数据与预期不一致时，系统能够按用例和设备准确归因，并向
+调用者返回不健康结果，而不是隐藏失败或盲目自愈。
+
+[在 Bilibili 观看增量用例失败诊断演示](https://www.bilibili.com/video/BV1EDKG6EELD)
+
+---
+
 ## 从 Clone 到报告的执行手册
 
 当本机 Android/iOS 工具链和模拟器已经准备好后，可以严格按下面步骤从
