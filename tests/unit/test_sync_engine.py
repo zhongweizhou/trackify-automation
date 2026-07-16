@@ -22,6 +22,7 @@ from scripts.sync_engine import (
     build_plan,
     build_plan_from_rows,
     changed_nodeids,
+    changed_plan_payload,
     execute_once,
     file_sha256,
     parse_feature,
@@ -427,6 +428,46 @@ def test_changed_nodeids_are_targeted_and_stable() -> None:
         "tests/step_defs/add_transaction_steps.py::"
         "test_validation__empty_amount_shows_error_and_does_not_save",
     )
+
+
+def test_changed_plan_payload_separates_runnable_and_lifecycle_changes(
+    tmp_path: Path,
+) -> None:
+    root = _sync_root(tmp_path)
+    workbook = root / "data" / "test_cases.xlsx"
+    rows = parse_workbook(workbook)
+    modified = replace(rows[0], title="Changed expense health check")
+    deprecated = replace(
+        _row(rows, "TC_ADD_TX_005"),
+        status="deprecated",
+        deprecated_in="2.0.0",
+    )
+    plan = build_plan_from_rows(
+        _replace_row(
+            _replace_row(rows, rows[0].scenario_id, modified),
+            deprecated.scenario_id,
+            deprecated,
+        ),
+        root,
+    )
+
+    payload = changed_plan_payload(plan, workbook)
+
+    assert payload["schema_version"] == 1
+    assert payload["has_drift"] is True
+    assert [item["test_case_id"] for item in payload["changes"]] == [
+        "TC_ADD_TX_001",
+        "TC_ADD_TX_005",
+    ]
+    assert [item["test_case_id"] for item in payload["runnable"]] == [
+        "TC_ADD_TX_001"
+    ]
+    assert payload["runnable"][0]["nodeid"].endswith(
+        "::test_changed_expense_health_check"
+    )
+    deprecated_item = payload["changes"][1]
+    assert deprecated_item["kind"] == "deprecated"
+    assert deprecated_item["nodeid"] is None
 
 
 def test_changed_case_success_reports_count_and_allure_path(

@@ -240,6 +240,9 @@ uv run python scripts/sync_engine.py --check
 
 # 增量更新并只执行变化用例
 uv run python scripts/sync_engine.py --apply --run-changed
+
+# 一条命令完成检查、同步，并在所有 Android/iOS 设备执行全部变化用例
+./scripts/run_changed_matrix.sh
 ```
 
 ### 2. 单设备完整执行
@@ -510,9 +513,42 @@ uv run python scripts/sync_engine.py --apply
 # 应用后只执行新增/修改的 active 场景
 uv run python scripts/sync_engine.py --apply --run-changed
 
+# 一键检查、同步并在所有 Android/iOS 设备执行变化用例
+./scripts/run_changed_matrix.sh
+
 # 本地监听，连续写入停止 5 秒后触发
 uv run python scripts/sync_engine.py --watch --apply
 ```
+
+`run_changed_matrix.sh` 是推荐的跨设备变化健康门禁。它读取机器可解析的变化
+清单，在写入前发现设备并检查 Appium，原子应用通过校验的 Feature 变化，然后
+固定使用矩阵 `replicate` 模式：每条新增/修改的 active 用例都会在每台选中
+设备执行，而不是被拆分到不同设备。
+
+```bash
+# 默认：preprod，所有已发现的 Android + iOS 设备
+./scripts/run_changed_matrix.sh
+
+# 只在全部 Android 设备执行
+./scripts/run_changed_matrix.sh --platform android
+
+# 只选择两台设备，--device 可以重复
+./scripts/run_changed_matrix.sh \
+  --device <Android设备UDID> \
+  --device <iOS设备UDID>
+
+# iOS 真机需要签名包
+./scripts/run_changed_matrix.sh \
+  --platform ios \
+  --ios-real-app "$PWD/app/Trackify-preprod.ipa"
+```
+
+退出码 `0` 表示没有待执行变化，或全部变化用例在每台设备都通过；`1` 表示
+至少一条变化用例在至少一台设备失败；`2` 表示校验、collection、设备、
+Appium、应用包、锁或 I/O 导致流程无法完成。报告位于
+`report/changed-device-matrix/<环境>/<时间戳>/`：`summary.md` 按用例 ID ×
+设备展示 Changed Case Health，`summary.json` 保存相同的机器可读变化清单和
+结果，同时包含每台设备的日志、JUnit、截图及合并 Allure 证据。
 
 引擎会在第一次写入前校验完整工作簿和两个 Feature，并使用 Module 白名单、
 稳定 `scenario_id`、带微秒的备份、同目录临时文件、`os.replace` 和并发锁。

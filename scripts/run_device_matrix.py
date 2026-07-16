@@ -331,7 +331,11 @@ def build_assignments(
 ) -> list[DeviceAssignment]:
     """Build full-suite or split-suite assignments for the discovered devices."""
     if distribution == "replicate":
-        return [DeviceAssignment(device=device, assigned_nodeids=None) for device in devices]
+        selected = tuple(nodeids) if nodeids is not None else None
+        return [
+            DeviceAssignment(device=device, assigned_nodeids=selected)
+            for device in devices
+        ]
     if nodeids is None:
         raise ValueError("Split distribution requires collected pytest node IDs.")
 
@@ -600,12 +604,38 @@ def generate_allure_report(run_root: Path, combined_dir: Path) -> Path | None:
     return report_dir
 
 
+def load_change_manifest(path: Path | None) -> dict[str, object] | None:
+    """Load and minimally validate a sync-engine changed-case manifest."""
+    if path is None:
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid change manifest {path}: {exc}") from exc
+    runnable = payload.get("runnable")
+    if payload.get("schema_version") != 1 or not isinstance(runnable, list):
+        raise ValueError(f"unsupported change manifest schema: {path}")
+    required_fields = ("kind", "test_case_id", "title", "nodeid")
+    if any(
+        not isinstance(item, dict)
+        or any(not isinstance(item.get(field), str) for field in required_fields)
+        for item in runnable
+    ):
+        raise ValueError(f"invalid runnable cases in change manifest: {path}")
+    return payload
+
+
+def _markdown(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
 def write_summary(
     run_root: Path,
     started_at: datetime,
     results: list[DeviceResult],
     allure_report: Path | None,
     distribution: str,
+    change_manifest: dict[str, object] | None = None,
 ) -> None:
     completed_at = datetime.now().astimezone()
     payload = {
@@ -615,6 +645,9 @@ def write_summary(
         "completed_at": completed_at.isoformat(),
         "status": "PASSED" if all(item.status == "PASSED" for item in results) else "FAILED",
         "allure_report": str(allure_report) if allure_report else None,
+        "changed_cases": (
+            change_manifest.get("runnable", []) if change_manifest else []
+        ),
         "devices": [asdict(result) for result in results],
     }
     (run_root / "summary.json").write_text(
@@ -645,6 +678,40 @@ def write_summary(
             f"{result.errors} | {result.skipped} | {result.duration_seconds:.1f}s | "
             f"{result.status} |"
         )
+
+    changed_cases = payload["changed_cases"]
+    if changed_cases:
+        device_headers = [
+            f"{result.platform} {result.device_name}" for result in results
+        ]
+        lines.extend(
+            [
+                "",
+                "## Changed Case Health",
+                "",
+                "| Change | Test Case ID | Scenario | "
+                + " | ".join(_markdown(header) for header in device_headers)
+                + " |",
+                "|---|---|---|" + "---|" * len(results),
+            ]
+        )
+        for changed_case in changed_cases:
+            nodeid = str(changed_case["nodeid"])
+            pytest_name = nodeid.rsplit("::", 1)[-1]
+            statuses = []
+            for result in results:
+                case = next(
+                    (item for item in result.cases if item.name == pytest_name),
+                    None,
+                )
+                statuses.append(case.status if case else "NOT_RUN")
+            lines.append(
+                f"| {_markdown(changed_case['kind'])} | "
+                f"`{_markdown(changed_case['test_case_id'])}` | "
+                f"{_markdown(changed_case['title'])} | "
+                + " | ".join(statuses)
+                + " |"
+            )
     lines.extend(["", "## Artifacts", ""])
     for result in results:
         lines.extend(
@@ -695,6 +762,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Signed .ipa or .app for physical iOS devices",
     )
     parser.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
+    parser.add_argument(
+        "--change-manifest",
+        type=Path,
+        help="Sync-engine JSON manifest to embed in the matrix health report",
+    )
     parser.add_argument("--android-system-port-base", type=int, default=8200)
     parser.add_argument("--ios-wda-port-base", type=int, default=8100)
     parser.add_argument("--ios-mjpeg-port-base", type=int, default=9100)
@@ -705,6 +777,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    change_manifest = load_change_manifest(args.change_manifest)
     devices = discover_devices(args.platform, set(args.device))
     if not devices:
         print("[matrix] No matching ready devices were discovered.", file=sys.stderr)
@@ -716,8 +789,11 @@ def main() -> int:
             f"  - {device.platform}: {device.name}, OS {device.os_version}, "
             f"{device.target_type}, UDID {device.udid}"
         )
+    normalized_pytest_args = normalize_pytest_args(args.pytest_args)
     collected_nodeids = (
-        collect_test_nodeids(args) if args.distribution == "split" else None
+        collect_test_nodeids(args)
+        if args.distribution == "split" or normalized_pytest_args
+        else None
     )
     assignments = build_assignments(
         devices,
@@ -742,6 +818,11 @@ def main() -> int:
                 f"  - {device.platform} {device.name}: idle "
                 "(more devices than selected tests)"
             )
+    elif collected_nodeids is not None:
+        print(
+            f"[matrix] Replicating {len(collected_nodeids)} selected test(s) "
+            f"across {len(assignments)} device(s)."
+        )
     if args.list:
         return 0
 
@@ -781,6 +862,7 @@ def main() -> int:
         results,
         allure_report,
         args.distribution,
+        change_manifest,
     )
 
     print(f"[matrix] Summary: {run_root / 'summary.md'}")

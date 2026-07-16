@@ -13,6 +13,7 @@ app/
 report/allure-results/
 report/screenshots/
 report/device-matrix/
+report/changed-device-matrix/
 allure-results/
 allure-report/
 data/.backup/

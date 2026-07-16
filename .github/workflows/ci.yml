@@ -37,6 +37,9 @@ jobs:
       - name: Test device-matrix distribution
         run: uv run python -m unittest discover -s unit_tests -v
 
+      - name: Validate changed-case matrix entrypoint
+        run: bash -n scripts/run_changed_matrix.sh && scripts/run_changed_matrix.sh --help >/dev/null
+
       - name: Test AI failure triage
         run: uv run pytest -m unit tests/unit/test_triage.py -q
 
