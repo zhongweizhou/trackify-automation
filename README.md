@@ -634,7 +634,6 @@ trackify-automation/
 │   ├── locator_loader.py           # YAML locator resolver
 │   └── system_dialogs.py           # Notification permission handling
 ├── data/
-│   ├── test_data.yaml
 │   ├── test_cases.xlsx              # Working BDD registry/source of truth
 │   └── test_cases_template.xlsx     # Reusable corrected seven-case baseline
 ├── scripts/

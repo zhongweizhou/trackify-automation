@@ -93,8 +93,8 @@ trackify-automation/
 │   └── triage.py                    # LLM-based failure categorizer
 │
 ├── data/
-│   ├── test_data.yaml               # Fixture rows for tags / notes / categories
 │   ├── test_cases.xlsx              # Manual test case registry (Task 14 — sync source)
+│   ├── test_cases_template.xlsx     # Reusable corrected seven-case baseline
 │   └── .backup/                     # Auto-created by sync_engine.py before each write
 │
 ├── scripts/
@@ -911,7 +911,7 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 | 4 | Locator loader | `utils/locator_loader.py`, `locator/home.yaml` (skeleton) | `load_locator("home", "x", "android")` returns string | `feat(utils): yaml locator loader + skeleton` |
 | 5 | Home page + Locator | `page/home_page.py`, `locator/home.yaml` | `home.click_add_expense()` works against manual Appium session | `feat(page): home page (Add Transaction shortcut)` |
 | 6 | Add Transaction page + Locator | `page/add_transaction_page.py`, `locator/add_transaction.yaml` | `add_tx.add_expense(amount=100, category="Food")` works | `feat(page): add transaction page (all 3 types)` |
-| 7 | Add Transaction flow | `flow/add_transaction_flow.py`, `data/test_data.yaml` | `flow.add_expense(...)` orchestrates Page + returns new ID | `feat(flow): add transaction business logic` |
+| 7 | Add Transaction flow | `flow/add_transaction_flow.py` | `flow.add_expense(...)` orchestrates Page + returns new ID | `feat(flow): add transaction business logic` |
 | 8 | First BDD feature (Add Expense happy path) | `tests/features/add_transaction.feature`, `tests/step_defs/add_transaction_steps.py`, `conftest.py` (page/flow fixtures) | `pytest tests/features/add_transaction.feature -k "happy_path"` collects and runs **only** the "Add expense happy path" scenario from §6.7. Other 4 Add Transaction scenarios written but tagged `@skip` (or feature-level Background-only). Implements every §6.6 phrase used in this scenario. | `test(case): add transaction bdd (expense happy path)` |
 | 8a | First-run setup baseline | `locator/onboarding.yaml`, `page/onboarding_page.py`, `flow/app_setup_flow.py`, `conftest.py`, BDD `Background` blocks | Every business scenario completes `Kimbal` → `$ US Dollar` + `30000` → Bank SMS Reader enabled + `Get Started`; no test path taps onboarding `Skip`; Home shows `Kimbal` and `$` before business actions | `feat(setup): complete required first-run configuration` |
 | 8b | Remaining Add Transaction scenarios | `tests/features/add_transaction.feature`, `tests/step_defs/add_transaction_steps.py` | Un-skip the remaining **4 scenarios** from §6.7 (Add Income, Add Transfer, Validation, Custom Category). Implement the additional §6.6 phrases (`user selects type`, `user taps "Add new category"`, `user creates custom category`, `error message ... is shown for amount`, `no transaction appears ...`). Custom Category creates and selects `baby cost` with any icon/color. All **5 Add Transaction scenarios** pass. | `test(case): add transaction bdd (4 more scenarios + custom category)` |
