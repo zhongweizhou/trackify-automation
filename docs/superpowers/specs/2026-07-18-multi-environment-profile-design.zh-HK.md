@@ -2,7 +2,7 @@
 
 [English](2026-07-18-multi-environment-profile-design.md) |
 [简体中文](2026-07-18-multi-environment-profile-design.zh-CN.md) |
-[繁體中文](2026-07-18-multi-environment-profile-design.zh-TW.md)
+[繁體中文](2026-07-18-multi-environment-profile-design.zh-HK.md)
 
 ## 目標
 

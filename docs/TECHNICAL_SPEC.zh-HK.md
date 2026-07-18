@@ -939,7 +939,7 @@ adb shell pm list packages | grep com.blixcode.trackify # 確認套件存在
 
   **架構(2 個階段)**:
 
-  1. **本地加權啟發式(始終啟用)** —— 在模組匯入時編譯一次 `LOCAL_SIGNATURES`,然後匹配正規化的 `error_msg + traceback`。每個特徵有各自的信心度。選擇最高信心度的匹配;並列時按 `Env > Locator > Data > App Bug > Script`。信心度 `>= 0.70` 時直接回傳。不要把弱匹配疊加:多個泛型字串不能拼出高信心度。該階段不進行任何檔案、環境或網路 I/O。
+  1. **本地加權啟發式(始終啟用)** —— 在模組匯入時編譯一次 `LOCAL_SIGNATURES`,然後匹配正規化的 `error_msg + traceback`。每個特徵有各自的信心度。選擇最高信心度的匹配;並列時按 `Env > Locator > Data > App Bug > Script`。信心度 `>= 0.70` 時直接回傳。不要把弱匹配疊加:多個泛型字串不能拼出高信心度。該階段不進行任何檔案、環境或網絡 I/O。
   2. **Claude 相容回退(顯式 opt-in)** —— 僅在本地信心度低於 `0.70` 且 `AI_TRIAGE_LLM_ENABLED=1`、`ANTHROPIC_API_KEY`、`ANTHROPIC_MODEL` 都存在時執行。`ANTHROPIC_BASE_URL` 選用,預設 `https://api.anthropic.com`;如 `https://api.minimaxi.com/anthropic` 的閘道路徑會在附加 `/v1/messages` 之前被保留。透過 Python 標準函式庫(或測試中的可注入 callable)使用 Anthropic Messages 協定;不要在 §1 之外新增 SDK 相依。最多一次請求,無重試,總逾時 5 秒。任何逾時、HTTP 錯誤、設定缺失、JSON 格式錯誤、未知名稱或非法欄位都回傳 `Unknown / 0.0`,且不拋例外。
 
   **必需的本地特徵**(`re.IGNORECASE`;`re.DOTALL` 僅用於受限的上下文模式):
@@ -959,10 +959,10 @@ adb shell pm list packages | grep com.blixcode.trackify # 確認套件存在
   | **Script** | `python_contract`:`AttributeError` 或 `TypeError` | `0.90` | 閱讀頂層專案幀,修正 API/型別用法 |
   | **Script** | `generic_assertion`:裸 `AssertionError` | `0.40` | 本身模糊;沒有更強上下文時不應歸類為 Script |
 
-  **輸入正規化與隱私**:
+  **輸入正規化與私隱**:
   - 輸入鍵:`error_msg`、`traceback`,可選 `test_name`、`phase`、`screenshot_path`。出於命令列/向後相容考量,缺失的 `test_name` 預設 `unknown`,缺失的 `phase` 預設 `call`。
   - 在送給 LLM 之前,`error_msg` 限制為 2,000 字元,traceback 限制為最後 12,000 字元。
-  - 在附加或網路使用前,對授權標頭、API key/token、URL query 字串做脫敏。
+  - 在附加或網絡使用前,對授權標頭、API key/token、URL query 字串做脫敏。
   - 多模態輸入超出範圍。僅傳送 `screenshot_available` 與截圖 basename;絕不傳送影像位元組或絕對本地路徑。
   - 將例外文字與 traceback 視為不可信的引用資料。系統提示明確要求忽略嵌入在失敗文字中的指令,且不暴露任何工具。
   - 僅請求一個 JSON 物件(`temperature=0`,小且受限的輸出)。驗證名稱白名單、數值信心度、非空受限字串,並忽略未知回應欄位。
@@ -977,7 +977,7 @@ adb shell pm list packages | grep com.blixcode.trackify # 確認套件存在
 
   **執行展示**:
   - 通過的測試不會觸發 triage 呼叫或附件。僅對第一個失敗階段進行分類。
-  - `classifier=local` 證明在沒有網路 I/O 的情況下回傳了確定性特徵;`classifier=llm` 表示嘗試了一次相容模型呼叫;`classifier=disabled` 表示由於缺少必要的 opt-in 設定,模糊證據無法使用 LLM。
+  - `classifier=local` 證明在沒有網絡 I/O 的情況下回傳了確定性特徵;`classifier=llm` 表示嘗試了一次相容模型呼叫;`classifier=disabled` 表示由於缺少必要的 opt-in 設定,模糊證據無法使用 LLM。
   - 終端行是快速訊號,Allure `AI Triage` JSON 是可稽核的記錄。兩者都是顧問式,必須與原始 traceback 與截圖一起閱讀。
   - 真實 key 只屬於被忽略的 `.env`;`.env.example` 只放占位符。專案從不自動載入 `.env`,並且不得為了閘道呼叫成功而關閉憑證校驗。
   - 執行時設定與驗證流程記錄在 [`docs/AI_TRIAGE.md`](AI_TRIAGE.md)。
@@ -991,9 +991,9 @@ adb shell pm list packages | grep com.blixcode.trackify # 確認套件存在
   **驗收標準**:
   - `uv run python -c "from ai.triage import triage_failure; print(triage_failure({'error_msg': 'NoSuchElementException: ...', 'traceback': ''}).category)"` 輸出 `Locator`。
   - `uv run pytest -m unit tests/unit/test_triage.py -q` 在沒有執行 Appium server 或連線裝置的情況下通過。
-  - 單元案例涵蓋每個類別、優先順序、裸 `AssertionError -> Unknown`(無 LLM)、設定缺失、逾時/非法 LLM 輸出、信心度截斷、脫敏,以及本地命中時零網路呼叫。
+  - 單元案例涵蓋每個類別、優先順序、裸 `AssertionError -> Unknown`(無 LLM)、設定缺失、逾時/非法 LLM 輸出、信心度截斷、脫敏,以及本地命中時零網絡呼叫。
   - 受控的 setup 或 call 失敗恰好產生一份 `AI Triage` JSON 附件(滿足要求的 schema)和一行可見的主控台輸出;原始 pytest 失敗保持不變。
-  - 缺少 `ANTHROPIC_API_KEY` 或 LLM 被停用時,回傳 `Unknown`、`confidence=0.0`、`classifier=disabled`,無例外,無網路呼叫。
+  - 缺少 `ANTHROPIC_API_KEY` 或 LLM 被停用時,回傳 `Unknown`、`confidence=0.0`、`classifier=disabled`,無例外,無網絡呼叫。
   - 本地分類無 I/O,且具確定性。可以出於資訊目的對執行時進行基準測試,但不需要硬體相關的 `<1 ms` 斷言。
 
   **PoC 範圍之外**:

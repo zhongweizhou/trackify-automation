@@ -134,7 +134,7 @@ PY
 .venv/bin/pytest -m unit tests/unit/test_triage.py -q
 ```
 
-驗證本地、零網路的判定路徑:
+驗證本地、零網絡的判定路徑:
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -171,7 +171,7 @@ pprint(asdict(triage_failure({
 PY
 ```
 
-`classifier=llm` 表示確實嘗試了網路回退。模型回傳合法時,會得到受限
+`classifier=llm` 表示確實嘗試了網絡回退。模型回傳合法時,會得到受限
 的 reasoning/action。模型輸出不符合嚴格格式時,仍回傳
 `llm / Unknown / 0.0`,且永遠不會改變測試結果。
 
@@ -187,14 +187,14 @@ PY
 | `HTTP 401` | API key 無效/未載入 | 重新生成本地 key 並 source `.env`;不要列印它 |
 | `HTTP 429` | 配額或限流 | 檢查 provider 配額;不要在測試報告裡加自動重試 |
 | TLS 校驗失敗 | Python 的 CA bundle 缺失 | 設定合法的 `SSL_CERT_FILE`;**不要**關閉校驗 |
-| 連線/逾時 | 端點、DNS、代理或網路問題 | 檢查 Base URL 與網路鏈路 |
+| 連線/逾時 | 端點、DNS、代理或網絡問題 | 檢查 Base URL 與網絡鏈路 |
 | 回傳非法回應 | 模型輸出不滿足嚴格 JSON 契約 | 保持 `Unknown`,檢視原始失敗,先統計頻次再調整策略 |
 
-## 隱私與可靠性邊界
+## 私隱與可靠性邊界
 
 - 錯誤訊息最長 2,000 字元,traceback 最長 12,000 字元。
 - 授權標頭、key、token 與 URL query 會被遮罩。
 - 例外文字視為不可信的 prompt 資料。
 - 僅允許發起一次 LLM 請求,無重試,總逾時 5 秒。
-- Unknown/網路/模型例外永遠不能取代原始 pytest 失敗。
+- Unknown/網絡/模型例外永遠不能取代原始 pytest 失敗。
 - 模型建議只是除錯假設,不是確認後的根因。
