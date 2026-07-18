@@ -19,9 +19,9 @@
 建議依次查看：
 
 1. [Android + iOS 多裝置測試報告示例](docs/reports/device-matrix-preprod-sample.md)
-2. [技術規格](docs/TECHNICAL_SPEC.zh-TW.md)
-3. [架構決策](docs/DESIGN.zh-TW.md)
-4. [專案復盤](docs/REFLECTION.zh-TW.md)
+2. [技術規格](docs/TECHNICAL_SPEC.zh-HK.md)
+3. [架構決策](docs/DESIGN.zh-HK.md)
+4. [專案復盤](docs/REFLECTION.zh-HK.md)
 
 | 工程亮點 | 儲存庫中的體現 |
 |---|---|
@@ -302,7 +302,7 @@ uv run pytest -m "not unit" --collect-only -q
 # 不需要 Appium/裝置，驗證矩陣分片算法
 .venv/bin/python -m unittest discover -s unit_tests -v
 
-# 不需要 Appium/裝置/網路，驗證 Task 13 失敗歸因
+# 不需要 Appium/裝置/網絡，驗證 Task 13 失敗歸因
 uv run pytest -m unit tests/unit/test_triage.py -q
 
 # 不需要 Appium/裝置，驗證 Task 14 增量同步和回滾
@@ -519,7 +519,7 @@ report/device-matrix/<環境>/<時間戳>/
 
 ## 技術規格提煉
 
-[`docs/TECHNICAL_SPEC.zh-TW.md`](docs/TECHNICAL_SPEC.zh-TW.md) 將實作方式定義成可評審的
+[`docs/TECHNICAL_SPEC.zh-HK.md`](docs/TECHNICAL_SPEC.zh-HK.md) 將實作方式定義成可評審的
 工程契約，主要價值包括：
 
 - **架構邊界**：Step 不直接操作 Appium，Flow 只編排業務，Page 負責 UI，
@@ -601,18 +601,18 @@ set -a; source .env; set +a
 `export SSL_CERT_FILE=/etc/ssl/cert.pem`，不要關閉證書驗證。
 
 只有本地置信度低於 `0.70` 時才允許一次請求，不重試，總超時 5 秒。錯誤文本
-在網路呼叫前會被截斷和脫敏，Authorization、Token、API Key 和 URL query
+在網絡呼叫前會被截斷和脫敏，Authorization、Token、API Key 和 URL query
 都會移除。截圖不會上傳，只允許傳入“是否存在”和檔案名。設定缺失、超時、
 HTTP 錯誤或回應不合法時都安全降級為 `Unknown`。
 
-無需 Appium、裝置或網路即可執行完整 Task 13 測試：
+無需 Appium、裝置或網絡即可執行完整 Task 13 測試：
 
 ```bash
 uv run pytest -m unit tests/unit/test_triage.py -q
 ```
 
-完整設定檢查、local/LLM probe、pytest/Allure 實際驗證步驟、問題排查和隱私
-邊界見 [`docs/AI_TRIAGE.zh-TW.md`](docs/AI_TRIAGE.zh-TW.md)。
+完整設定檢查、local/LLM probe、pytest/Allure 實際驗證步驟、問題排查和私隱
+邊界見 [`docs/AI_TRIAGE.zh-HK.md`](docs/AI_TRIAGE.zh-HK.md)。
 
 ## Excel 管理的 BDD 同步
 
@@ -885,11 +885,11 @@ iOS 26.5：   7 passed / 0 failed
 
 ## 更多文件
 
-- [完整技術規格](docs/TECHNICAL_SPEC.zh-TW.md)
-- [架構和取捨](docs/DESIGN.zh-TW.md)
-- [功能探索記錄](docs/Feature_Inventory.zh-TW.md)
+- [完整技術規格](docs/TECHNICAL_SPEC.zh-HK.md)
+- [架構和取捨](docs/DESIGN.zh-HK.md)
+- [功能探索記錄](docs/Feature_Inventory.zh-HK.md)
 - [擴展路線](docs/SCALING.md)
-- [專案復盤](docs/REFLECTION.zh-TW.md)
+- [專案復盤](docs/REFLECTION.zh-HK.md)
 
 ---
 
