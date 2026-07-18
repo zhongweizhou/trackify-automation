@@ -28,10 +28,10 @@
 | 契约驱动的 BDD | 7 个版本化场景、受控 Gherkin 词汇、可复用步骤、严格 pytest marker |
 | 分层架构 | Gherkin → Step Definitions → Flow → Page Object → Appium Driver，各层职责单一 |
 | 跨平台定位 | Android/iOS 定位器统一放在 YAML；优先语义化 `accessibility_id`，必要时使用受控 fallback |
-| 确定性隔离 | 每条用例前清理应用数据，再完成一致的姓名、币种、月预算、Bank SMS Reader 初始化 |
+| 确定性隔离 | 每条用例前清理应用数据，再使用经过校验的 `test`、`preprod` 或 `prod` profile 完成初始化 |
 | 多设备并发 | 一个命令发现全部可用 Android/iOS 设备，并通过独立 pytest 进程选择全量复制或用例分片 |
 | Appium 端口隔离 | 为 Android `systemPort`、iOS WDA/MJPEG 端口和 derived-data 目录分配唯一值 |
-| 可追溯报告 | 记录环境、平台、设备、系统版本、UDID、逐用例结果、JUnit、日志、截图和合并 Allure |
+| 可追溯报告 | 记录环境、App 版本、平台、设备、系统版本、UDID、逐用例结果、JUnit、日志、截图和合并 Allure |
 | 失败智能归因 | 首个失败阶段先使用确定性本地签名分类，歧义失败仅在显式开启后调用 Claude fallback |
 | Excel 活用例库 | 经过校验的用例表只增量更新受管 Gherkin 块，保持未变化字节，并可只执行变化场景 |
 | 可评审过程 | 技术规格明确分层规则、验收标准、反模式和按任务拆分的提交纪律 |
@@ -251,6 +251,43 @@ Page 和 YAML Locator 层。
   --ios-real-app "$PWD/app/Trackify-preprod.ipa"
 ```
 
+## 选择测试环境
+
+同一套 7 条业务场景支持三个经过严格校验的 onboarding profile：
+
+| `--env` | 姓名 | 币种 | Bank SMS Reader |
+|---|---|---|---|
+| `test` | `Rose` | `$ US Dollar` | 开启 |
+| `preprod`（默认） | `Kimbal` | `$ US Dollar` | 开启 |
+| `prod` | `Kimi` | `$ US Dollar` | 开启 |
+
+```bash
+# 单设备直接执行
+uv run pytest --env test -m "not unit"
+uv run pytest --env preprod -m "not unit"
+uv run pytest --env prod -m "not unit"
+
+# 所有已发现设备执行
+.venv/bin/python scripts/run_device_matrix.py --env test
+.venv/bin/python scripts/run_device_matrix.py --env preprod
+.venv/bin/python scripts/run_device_matrix.py --env prod
+```
+
+选择优先级为 `--env` > `TEST_ENV` > `preprod`。`data/environments/` 只维护
+不含密钥的共享 onboarding 配置；业务输入和预期结果仍由 Excel/Gherkin 管理。
+不支持的环境名或错误 YAML schema 会在 Appium 启动前失败。
+
+当前 `prod` 场景只清理和修改 Trackify 本地存储，因此允许执行。如果应用后续
+接入共享生产后端或生产凭据，必须重新评估破坏性用例边界。
+
+成功报告还必须包含明确的 App 版本。解析顺序是 `APP_VERSION`、Appium
+capability、Android 已安装包 `versionName`、iOS `.app/.ipa` 元数据。无法从
+构建产物识别时可显式覆盖：
+
+```bash
+APP_VERSION=1.2.3 uv run pytest --env test -m "not unit"
+```
+
 ## 测试命令分类汇总
 
 以下命令覆盖当前项目支持的主要执行方式。没有安装 `uv` 时，可将
@@ -449,7 +486,7 @@ uv run pytest -m "not unit" -s -vv
 5. 为每个 iOS 会话分配独立 WDA、MJPEG 端口和 derived-data 目录；
 6. 每台设备拥有独立日志、JUnit、Allure 原始结果和失败截图目录；
 7. 执行结束后合并 Allure 结果，并生成 Markdown 和 JSON 总结；
-8. 每条报告附带环境、分片策略、测试 node ID、设备名、系统版本和 UDID；
+8. 每条报告附带环境、App 版本、分片策略、测试 node ID、设备名、系统版本和 UDID；
 9. Android 使用 `pm clear`、iOS 模拟器使用 `mobile: clearApp`，iOS 真机
    通过卸载重装签名应用保证场景隔离。
 
@@ -472,6 +509,10 @@ report/device-matrix/<环境>/<时间戳>/
     ├── allure-results/
     └── screenshots/
 ```
+
+每条 Allure 结果都会展示环境、App 版本、平台、设备、系统版本和 UDID。
+矩阵汇总从每个 worker 的 `environment.properties` 读取 App 版本，因此 Android
+和 iOS 使用不同构建时也会分别展示，不会被合并成一个误导性的公共版本。
 
 查看真实的完整执行结果：
 [preprod Android + iOS 矩阵报告示例](docs/reports/device-matrix-preprod-sample.md)。

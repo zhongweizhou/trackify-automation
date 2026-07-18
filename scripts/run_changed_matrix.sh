@@ -115,6 +115,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$ENVIRONMENT" != "test" && "$ENVIRONMENT" != "preprod" && "$ENVIRONMENT" != "prod" ]]; then
+  echo "[changed-matrix] ERROR: --env must be test, preprod, or prod." >&2
+  exit 2
+fi
+
 if [[ "$PLATFORM" != "all" && "$PLATFORM" != "android" && "$PLATFORM" != "ios" ]]; then
   echo "[changed-matrix] ERROR: --platform must be all, android, or ios." >&2
   exit 2

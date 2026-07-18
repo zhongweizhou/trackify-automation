@@ -55,12 +55,16 @@ class AppSetupFlow:
 
     def enable_bank_sms_reader_and_finish(self) -> None:
         """Enable Bank SMS Reader, finish onboarding, and verify Home."""
+        self.configure_bank_sms_reader_and_finish(True)
+
+    def configure_bank_sms_reader_and_finish(self, enabled: bool) -> None:
+        """Apply the requested Bank SMS Reader state and finish onboarding."""
         if self._currency_symbol is None:
             raise RuntimeError("Currency and budget setup must be completed first.")
 
-        self._onboarding_page.enable_bank_sms_reader()
-        assert self._onboarding_page.is_bank_sms_reader_enabled(), (
-            "Bank SMS Reader was not enabled."
+        self._onboarding_page.set_bank_sms_reader_enabled(enabled)
+        assert self._onboarding_page.is_bank_sms_reader_enabled() is enabled, (
+            f"Bank SMS Reader did not reach the configured state {enabled}."
         )
         self._onboarding_page.tap_get_started()
         self._home_page.verify_visible()

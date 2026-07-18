@@ -2,9 +2,9 @@ Feature: Transactions List
 
   Background:
     Given app is launched with a clean database
-    And user enters name "Kimbal" and continues
-    And user selects currency "$ US Dollar" and sets monthly budget "30000"
-    And user enables Bank SMS Reader and gets started
+    And user enters the configured environment name and continues
+    And user selects the configured environment currency and sets monthly budget "30000"
+    And user applies the configured Bank SMS Reader setting and gets started
     And user is on the Home page
 
 # scenario_id: TC_TXN_001
