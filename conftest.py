@@ -7,7 +7,7 @@ import os
 import re
 import subprocess
 import warnings
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,8 @@ from page.add_transaction_page import AddTransactionPage
 from page.home_page import HomePage
 from page.onboarding_page import OnboardingPage
 from page.transactions_page import TransactionsPage
+from utils.app_metadata import resolve_app_version
+from utils.config import load_config
 from utils.environment_profile import (
     SUPPORTED_ENVIRONMENTS,
     EnvironmentProfile,
@@ -45,6 +47,7 @@ SCREENSHOT_DIR = Path(
 ).expanduser()
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 _TRIAGED_FAILURE = pytest.StashKey[bool]()
+_EXECUTION_CONTEXT = pytest.StashKey[dict[str, str]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -119,12 +122,31 @@ def pytest_bdd_before_scenario(
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """Add matrix identity before fixtures so setup failures remain attributable."""
-    del item
-    context = _execution_context()
+    context = _execution_context(
+        environment=_selected_environment(item.config),
+    )
+    _attach_allure_context(context, include_app_version=False)
+
+
+def pytest_runtest_call(item: pytest.Item) -> None:
+    """Attach app metadata after driver fixtures have completed setup."""
+    context = item.config.stash.get(_EXECUTION_CONTEXT, None)
+    if context is not None:
+        _attach_allure_context(context, include_app_version=True)
+
+
+def _attach_allure_context(
+    context: Mapping[str, str],
+    *,
+    include_app_version: bool,
+) -> None:
+    """Attach one resolved execution context to the current Allure test."""
     allure.dynamic.parent_suite(context["environment"])
     allure.dynamic.suite(f"{context['platform']} - {context['device_name']}")
     allure.dynamic.label("host", context["device_udid"])
     allure.dynamic.parameter("Environment", context["environment"])
+    if include_app_version:
+        allure.dynamic.parameter("App Version", context["app_version"])
     allure.dynamic.parameter("Platform", context["platform"])
     allure.dynamic.parameter("Device", context["device_name"])
     allure.dynamic.parameter("OS Version", context["os_version"])
@@ -251,10 +273,7 @@ def _capture_failure_screenshot(item: pytest.Item) -> Path | None:
 @pytest.fixture(scope="session")
 def environment_profile(pytestconfig: pytest.Config) -> EnvironmentProfile:
     """Load the selected environment before any Appium session is created."""
-    environment = resolve_environment(
-        pytestconfig.getoption("trackify_environment"),
-        os.environ,
-    )
+    environment = _selected_environment(pytestconfig)
     return load_environment_profile(environment)
 
 
@@ -270,11 +289,24 @@ def driver(
     """
     from utils.driver import AppiumDriverFactory
 
-    del environment_profile
     platform = os.getenv("PLATFORM", "android")
-    appium_driver = AppiumDriverFactory(platform=platform).create()
-    _write_allure_environment(pytestconfig, appium_driver)
+    config = load_config(platform=platform)
+    appium_driver = AppiumDriverFactory(config=config).create()
     try:
+        partial_context = _execution_context(
+            appium_driver,
+            environment=environment_profile.environment,
+            app_version="unresolved",
+        )
+        _write_allure_environment(pytestconfig, partial_context)
+        app_version = resolve_app_version(appium_driver, config)
+        context = _execution_context(
+            appium_driver,
+            environment=environment_profile.environment,
+            app_version=app_version,
+        )
+        pytestconfig.stash[_EXECUTION_CONTEXT] = context
+        _write_allure_environment(pytestconfig, context)
         yield appium_driver
     finally:
         appium_driver.quit()
@@ -439,29 +471,45 @@ def _adb() -> str:
     return "adb"
 
 
-def _execution_context(driver: Any | None = None) -> dict[str, str]:
+def _selected_environment(pytestconfig: pytest.Config) -> str:
+    return resolve_environment(
+        pytestconfig.getoption("trackify_environment"),
+        os.environ,
+    )
+
+
+def _execution_context(
+    driver: Any | None = None,
+    *,
+    environment: str | None = None,
+    app_version: str | None = None,
+    environ: Mapping[str, str] = os.environ,
+) -> dict[str, str]:
     capabilities = getattr(driver, "capabilities", {}) if driver is not None else {}
-    platform = str(capabilities.get("platformName") or os.getenv("PLATFORM", "unknown"))
+    platform = str(
+        capabilities.get("platformName") or environ.get("PLATFORM", "unknown")
+    )
     device_name = str(
-        os.getenv("DEVICE_NAME")
+        environ.get("DEVICE_NAME")
         or capabilities.get("deviceName")
         or capabilities.get("appium:deviceName")
         or "unknown"
     )
     device_udid = str(
-        os.getenv("DEVICE_UDID")
+        environ.get("DEVICE_UDID")
         or capabilities.get("udid")
         or capabilities.get("appium:udid")
         or "unknown"
     )
     os_version = str(
-        os.getenv("OS_VERSION")
+        environ.get("OS_VERSION")
         or capabilities.get("platformVersion")
         or capabilities.get("appium:platformVersion")
         or "unknown"
     )
     return {
-        "environment": os.getenv("TEST_ENV", "preprod"),
+        "environment": environment or environ.get("TEST_ENV", "preprod"),
+        "app_version": app_version or environ.get("APP_VERSION", "unresolved"),
         "platform": platform,
         "device_name": device_name,
         "device_udid": device_udid,
@@ -469,7 +517,10 @@ def _execution_context(driver: Any | None = None) -> dict[str, str]:
     }
 
 
-def _write_allure_environment(pytestconfig: pytest.Config, driver: Any) -> None:
+def _write_allure_environment(
+    pytestconfig: pytest.Config,
+    context: Mapping[str, str],
+) -> None:
     report_dir = os.getenv("ALLURE_RESULTS_DIR") or getattr(
         pytestconfig.option, "allure_report_dir", None
     )
@@ -477,11 +528,11 @@ def _write_allure_environment(pytestconfig: pytest.Config, driver: Any) -> None:
         return
     output_dir = Path(report_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    context = _execution_context(driver)
     properties = "\n".join(
         f"{key}={value}"
         for key, value in (
             ("Test.Environment", context["environment"]),
+            ("App.Version", context["app_version"]),
             ("Device.Platform", context["platform"]),
             ("Device.Name", context["device_name"]),
             ("Device.UDID", context["device_udid"]),

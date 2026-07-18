@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 from scripts.run_device_matrix import (
     Device,
@@ -14,12 +17,17 @@ from scripts.run_device_matrix import (
     TestCaseResult,
     UNIT_TEST_IGNORE,
     build_assignments,
+    build_environment,
+    build_parser,
+    combine_allure_results,
     extract_collected_nodeids,
     load_change_manifest,
     normalize_pytest_args,
     split_nodeids,
     write_summary,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _device(index: int) -> Device:
@@ -44,6 +52,37 @@ class DeviceMatrixDistributionTests(unittest.TestCase):
 
     def test_mobile_matrix_excludes_pytest_unit_directory(self) -> None:
         self.assertEqual(UNIT_TEST_IGNORE, "--ignore=tests/unit")
+
+    def test_environment_option_accepts_only_supported_profiles(self) -> None:
+        parser = build_parser()
+
+        for environment in ("test", "preprod", "prod"):
+            self.assertEqual(
+                parser.parse_args(["--env", environment, "--list"]).environment,
+                environment,
+            )
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--env", "qa", "--list"])
+
+    def test_worker_environment_receives_selected_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = Namespace(
+                environment="prod",
+                appium_url="http://127.0.0.1:4723",
+                android_app=root / "app.apk",
+                android_system_port_base=8200,
+            )
+
+            environment = build_environment(
+                _device(0),
+                args,
+                0,
+                root / "allure-results",
+                root / "screenshots",
+            )
+
+            self.assertEqual(environment["TEST_ENV"], "prod")
 
     def test_extract_collected_nodeids_ignores_warnings_and_summary(self) -> None:
         output = """tests/step_defs/a.py::test_one
@@ -171,6 +210,7 @@ tests/step_defs/b.py::test_two
             results.append(
                 DeviceResult(
                     environment="preprod",
+                    app_version=f"1.2.{index}",
                     platform=device.platform,
                     device_name=device.name,
                     device_udid=device.udid,
@@ -231,10 +271,55 @@ tests/step_defs/b.py::test_two
             self.assertIn("## Changed Case Health", markdown)
             self.assertIn("TC_EXAMPLE_001", markdown)
             self.assertIn("| PASSED | FAILED |", markdown)
+            self.assertIn("| App Version |", markdown)
+            self.assertIn("1.2.0", markdown)
+            self.assertEqual(payload["devices"][1]["app_version"], "1.2.1")
             self.assertEqual(
                 payload["changed_cases"][0]["test_case_id"],
                 "TC_EXAMPLE_001",
             )
+
+    def test_combined_allure_properties_preserve_each_device_version(self) -> None:
+        results = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index in range(2):
+                device = _device(index)
+                worker = root / f"worker-{index}"
+                worker.mkdir()
+                results.append(
+                    DeviceResult(
+                        environment="test",
+                        app_version=f"2.0.{index}",
+                        platform=device.platform,
+                        device_name=device.name,
+                        device_udid=device.udid,
+                        os_version=device.os_version,
+                        target_type=device.target_type,
+                        status="PASSED",
+                        exit_code=0,
+                        tests=1,
+                        passed=1,
+                        failures=0,
+                        errors=0,
+                        skipped=0,
+                        duration_seconds=1.0,
+                        log_path="pytest.log",
+                        junit_path="junit.xml",
+                        allure_results=str(worker),
+                        screenshots="screenshots",
+                        assigned_nodeids=None,
+                        cases=[],
+                    )
+                )
+
+            combined = combine_allure_results(root, results, "split")
+            properties = (combined / "environment.properties").read_text(
+                encoding="utf-8"
+            )
+
+            self.assertIn("Device.1.App.Version=2.0.0", properties)
+            self.assertIn("Device.2.App.Version=2.0.1", properties)
 
 
 if __name__ == "__main__":

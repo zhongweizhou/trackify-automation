@@ -19,6 +19,11 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from utils.environment_profile import SUPPORTED_ENVIRONMENTS
+
 DEFAULT_REPORT_ROOT = ROOT / "report" / "device-matrix"
 SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 UNIT_TEST_IGNORE = "--ignore=tests/unit"
@@ -56,6 +61,7 @@ class DeviceResult:
     """Execution totals and artifact paths for one device."""
 
     environment: str
+    app_version: str
     platform: str
     device_name: str
     device_udid: str
@@ -517,8 +523,17 @@ def finish_device(running: RunningDevice, environment: str) -> DeviceResult:
     skipped = int(totals["skipped"])
     passed = max(0, tests - failures - errors - skipped)
     status = "PASSED" if exit_code == 0 else "FAILED"
+    worker_properties = read_environment_properties(
+        running.allure_dir / "environment.properties"
+    )
+    app_version = worker_properties.get("App.Version")
+    if not app_version and exit_code == 0:
+        raise RuntimeError(
+            f"Successful worker {running.device.udid} did not report App.Version"
+        )
     result = DeviceResult(
         environment=environment,
+        app_version=app_version or "unresolved",
         platform=running.device.platform,
         device_name=running.device.name,
         device_udid=running.device.udid,
@@ -551,6 +566,18 @@ def finish_device(running: RunningDevice, environment: str) -> DeviceResult:
     return result
 
 
+def read_environment_properties(path: Path) -> dict[str, str]:
+    """Read one worker's simple Allure environment properties file."""
+    if not path.is_file():
+        return {}
+    properties: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key:
+            properties[key] = value
+    return properties
+
+
 def combine_allure_results(
     run_root: Path,
     results: list[DeviceResult],
@@ -570,7 +597,7 @@ def combine_allure_results(
 
     devices = "; ".join(
         f"{result.platform} {result.device_name} {result.os_version} "
-        f"{result.target_type} ({result.device_udid})"
+        f"{result.target_type} ({result.device_udid}), app {result.app_version}"
         for result in results
     )
     properties = [
@@ -579,6 +606,13 @@ def combine_allure_results(
         f"Devices.Count={len(results)}",
         f"Devices={devices}",
     ]
+    for index, result in enumerate(results, start=1):
+        properties.extend(
+            [
+                f"Device.{index}.UDID={result.device_udid}",
+                f"Device.{index}.App.Version={result.app_version}",
+            ]
+        )
     (combined_dir / "environment.properties").write_text(
         "\n".join(properties) + "\n", encoding="utf-8"
     )
@@ -664,14 +698,14 @@ def write_summary(
         f"- Completed: `{payload['completed_at']}`",
         f"- Devices: `{len(results)}`",
         "",
-        "| Platform | Type | Device | OS | UDID | Assigned | Passed | Failed | Errors | "
+        "| Platform | Type | Device | OS | App Version | UDID | Assigned | Passed | Failed | Errors | "
         "Skipped | Duration | Status |",
-        "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|",
+        "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|",
     ]
     for result in results:
         lines.append(
             f"| {result.platform} | {result.target_type} | {result.device_name} | "
-            f"{result.os_version} | `{result.device_udid}` | "
+            f"{result.os_version} | {result.app_version} | `{result.device_udid}` | "
             f"{'all' if result.assigned_nodeids is None else len(result.assigned_nodeids)} | "
             f"{result.passed} | "
             f"{result.failures} | "
@@ -743,7 +777,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run pytest concurrently across connected Android and iOS devices."
     )
-    parser.add_argument("--env", dest="environment", default="preprod")
+    parser.add_argument(
+        "--env",
+        dest="environment",
+        choices=SUPPORTED_ENVIRONMENTS,
+        default="preprod",
+    )
     parser.add_argument("--platform", choices=("all", "android", "ios"), default="all")
     parser.add_argument(
         "--distribution",
