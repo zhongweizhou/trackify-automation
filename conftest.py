@@ -29,6 +29,12 @@ from page.add_transaction_page import AddTransactionPage
 from page.home_page import HomePage
 from page.onboarding_page import OnboardingPage
 from page.transactions_page import TransactionsPage
+from utils.environment_profile import (
+    SUPPORTED_ENVIRONMENTS,
+    EnvironmentProfile,
+    load_environment_profile,
+    resolve_environment,
+)
 
 PKG = os.getenv("ANDROID_PACKAGE", "com.blixcode.trackify")
 IOS_BUNDLE_ID = os.getenv("IOS_BUNDLE_ID", "com.blixcode.trackify")
@@ -39,6 +45,18 @@ SCREENSHOT_DIR = Path(
 ).expanduser()
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 _TRIAGED_FAILURE = pytest.StashKey[bool]()
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the environment selector used by direct pytest runs."""
+    parser.addoption(
+        "--env",
+        action="store",
+        dest="trackify_environment",
+        choices=SUPPORTED_ENVIRONMENTS,
+        default=None,
+        help="Target environment profile (default: TEST_ENV or preprod).",
+    )
 
 
 class FeatureFile(pytest.File):
@@ -231,7 +249,20 @@ def _capture_failure_screenshot(item: pytest.Item) -> Path | None:
 
 
 @pytest.fixture(scope="session")
-def driver(pytestconfig: pytest.Config) -> Generator[Any, None, None]:
+def environment_profile(pytestconfig: pytest.Config) -> EnvironmentProfile:
+    """Load the selected environment before any Appium session is created."""
+    environment = resolve_environment(
+        pytestconfig.getoption("trackify_environment"),
+        os.environ,
+    )
+    return load_environment_profile(environment)
+
+
+@pytest.fixture(scope="session")
+def driver(
+    pytestconfig: pytest.Config,
+    environment_profile: EnvironmentProfile,
+) -> Generator[Any, None, None]:
     """Create one Appium driver session for the pytest run.
 
     Yields:
@@ -239,6 +270,7 @@ def driver(pytestconfig: pytest.Config) -> Generator[Any, None, None]:
     """
     from utils.driver import AppiumDriverFactory
 
+    del environment_profile
     platform = os.getenv("PLATFORM", "android")
     appium_driver = AppiumDriverFactory(platform=platform).create()
     _write_allure_environment(pytestconfig, appium_driver)

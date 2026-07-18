@@ -6,6 +6,7 @@ from pytest_bdd import given, parsers, when
 
 from flow.add_transaction_flow import AddTransactionFlow
 from flow.app_setup_flow import AppSetupFlow
+from utils.environment_profile import EnvironmentProfile
 
 
 @given("app is launched with a clean database")
@@ -25,6 +26,15 @@ def user_enters_name_and_continues(
         name: Profile name from the Gherkin step.
     """
     app_setup_flow.enter_name_and_continue(name)
+
+
+@given("user enters the configured environment name and continues")
+def user_enters_configured_environment_name(
+    app_setup_flow: AppSetupFlow,
+    environment_profile: EnvironmentProfile,
+) -> None:
+    """Save the profile name selected by ``--env`` or ``TEST_ENV``."""
+    app_setup_flow.enter_name_and_continue(environment_profile.name)
 
 
 @given(
@@ -47,6 +57,20 @@ def user_configures_currency_and_budget(
     app_setup_flow.configure_currency_and_budget(currency, budget)
 
 
+@given(
+    parsers.parse(
+        'user selects the configured environment currency and sets monthly budget "{budget}"'
+    )
+)
+def user_configures_environment_currency_and_budget(
+    app_setup_flow: AppSetupFlow,
+    environment_profile: EnvironmentProfile,
+    budget: str,
+) -> None:
+    """Configure the selected environment currency and scenario budget."""
+    app_setup_flow.configure_currency_and_budget(environment_profile.currency, budget)
+
+
 @given("user enables Bank SMS Reader and gets started")
 def user_enables_bank_sms_reader(app_setup_flow: AppSetupFlow) -> None:
     """Enable Bank SMS Reader and finish onboarding.
@@ -55,6 +79,17 @@ def user_enables_bank_sms_reader(app_setup_flow: AppSetupFlow) -> None:
         app_setup_flow: First-run setup flow fixture.
     """
     app_setup_flow.enable_bank_sms_reader_and_finish()
+
+
+@given("user applies the configured Bank SMS Reader setting and gets started")
+def user_applies_environment_sms_setting(
+    app_setup_flow: AppSetupFlow,
+    environment_profile: EnvironmentProfile,
+) -> None:
+    """Apply the selected environment's SMS Reader setting and finish setup."""
+    app_setup_flow.configure_bank_sms_reader_and_finish(
+        environment_profile.bank_sms_reader_enabled
+    )
 
 
 @given("user is on the Home page")

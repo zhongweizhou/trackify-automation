@@ -142,8 +142,12 @@ class OnboardingPage(BasePage):
 
     def enable_bank_sms_reader(self) -> None:
         """Enable Bank SMS Reader and verify that the switch is checked."""
+        self.set_bank_sms_reader_enabled(True)
+
+    def set_bank_sms_reader_enabled(self, enabled: bool) -> None:
+        """Set Bank SMS Reader to the requested checked state."""
         self.wait_for(self._loc("tracking_page"))
-        if not self.is_bank_sms_reader_enabled():
+        if self.is_bank_sms_reader_enabled() is not enabled:
             self._tap_locator(self._loc("bank_sms_reader_switch"))
 
         by_locator = self._to_appium_locator(self._loc("bank_sms_reader_switch"))
@@ -152,7 +156,7 @@ class OnboardingPage(BasePage):
             lambda driver: str(
                 driver.find_element(*by_locator).get_attribute(attribute)
             ).lower()
-            in {"true", "1"}
+            in ({"true", "1"} if enabled else {"false", "0"})
         )
 
     def is_bank_sms_reader_enabled(self) -> bool:
