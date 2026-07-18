@@ -1,5 +1,9 @@
 # Multi-Environment Profile Design
 
+[English](2026-07-18-multi-environment-profile-design.md) |
+[简体中文](2026-07-18-multi-environment-profile-design.zh-CN.md) |
+[繁體中文](2026-07-18-multi-environment-profile-design.zh-TW.md)
+
 ## Objective
 
 Support `test`, `preprod`, and `prod` as explicit execution environments. The
