@@ -1,7 +1,7 @@
 # Trackify 移动端 UI 自动化
 
 <p align="center">
-  <a href="README.md">English</a> | <strong>简体中文</strong>
+  <a href="README.md">English</a> | <strong>简体中文</strong> | <a href="README.zh-TW.md">繁體中文</a>
 </p>
 
 > 面向 Trackify Flutter 个人财务应用的 AI 辅助端到端移动自动化框架。
@@ -19,9 +19,9 @@
 建议依次查看：
 
 1. [Android + iOS 多设备测试报告示例](docs/reports/device-matrix-preprod-sample.md)
-2. [技术规格](docs/TECHNICAL_SPEC.md)
-3. [架构决策](docs/DESIGN.md)
-4. [项目复盘](docs/REFLECTION.md)
+2. [技术规格](docs/TECHNICAL_SPEC.zh-CN.md)
+3. [架构决策](docs/DESIGN.zh-CN.md)
+4. [项目复盘](docs/REFLECTION.zh-CN.md)
 
 | 工程亮点 | 仓库中的体现 |
 |---|---|
@@ -519,7 +519,7 @@ report/device-matrix/<环境>/<时间戳>/
 
 ## 技术规格提炼
 
-[`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) 将实现方式定义成可评审的
+[`docs/TECHNICAL_SPEC.zh-CN.md`](docs/TECHNICAL_SPEC.zh-CN.md) 将实现方式定义成可评审的
 工程契约，主要价值包括：
 
 - **架构边界**：Step 不直接操作 Appium，Flow 只编排业务，Page 负责 UI，
@@ -612,7 +612,7 @@ uv run pytest -m unit tests/unit/test_triage.py -q
 ```
 
 完整配置检查、local/LLM probe、pytest/Allure 实际验证步骤、问题排查和隐私
-边界见 [`docs/AI_TRIAGE.md`](docs/AI_TRIAGE.md)。
+边界见 [`docs/AI_TRIAGE.zh-CN.md`](docs/AI_TRIAGE.zh-CN.md)。
 
 ## Excel 管理的 BDD 同步
 
@@ -885,11 +885,11 @@ iOS 26.5：   7 passed / 0 failed
 
 ## 更多文档
 
-- [完整技术规格](docs/TECHNICAL_SPEC.md)
-- [架构和取舍](docs/DESIGN.md)
-- [功能探索记录](docs/Feature_Inventory.md)
+- [完整技术规格](docs/TECHNICAL_SPEC.zh-CN.md)
+- [架构和取舍](docs/DESIGN.zh-CN.md)
+- [功能探索记录](docs/Feature_Inventory.zh-CN.md)
 - [扩展路线](docs/SCALING.md)
-- [项目复盘](docs/REFLECTION.md)
+- [项目复盘](docs/REFLECTION.zh-CN.md)
 
 ---
 

@@ -2,124 +2,175 @@
 
 ## Outcome
 
-The delivered suite covers seven Android BDD scenarios across the two selected
-journeys:
+The project now behaves as a small mobile test platform rather than a collection
+of isolated UI scripts:
 
-| Journey | Scenarios | Result |
-|---------|-----------|--------|
-| Add Transaction | Expense, Income, Transfer, empty amount, custom category | 5 passing |
-| Transactions | Type filter, historical date grouping | 2 passing |
+| Area | Delivered capability |
+|---|---|
+| Business coverage | Seven BDD scenarios across Add Transaction and Transactions |
+| Platforms | Shared business flows on Android and iOS with platform-owned locators |
+| Environments | Strict `test`, `preprod`, and `prod` onboarding profiles selected by CLI |
+| Distribution | Full replication or disjoint sharding across every discovered device |
+| Living cases | Validated Excel registry with incremental, transactional Feature updates |
+| Diagnostics | Screenshots, logs, JUnit, Allure, and advisory Task 13 failure triage |
+| Attribution | Environment, app version, device, OS version, and UDID per worker and case |
 
-Every business scenario completes first-run setup, and successful Add
-Transaction scenarios verify both the saved Transactions row and the Home
-monthly summary. The latest local Allure run completed with 7 passed, 0 failed,
-and 0 skipped.
+The isolated verification suite currently has 107 passing tests. All three
+environment values collect the same seven BDD scenarios. Real execution used
+Android 17 and an iPhone 17 simulator on iOS 26.5; both artifacts reported app
+version `1.1.0`. The `test` matrix verified environment-aware onboarding on both
+platforms, while focused `preprod` Android and `prod` iOS happy paths passed.
+
+The repository intentionally retains one unhealthy demonstration: the Income
+scenario enters `5002` but expects `5001.0`. It proves that the changed-case gate
+returns an attributable failure on both platforms. It must not be presented as
+a framework regression or as evidence that the full committed smoke selection
+is currently green.
 
 ## What Worked Well
 
 ### Clear ownership between layers
 
 Separating Gherkin, Steps, Flows, Pages, and locator YAML kept failures local.
-For example, changing a keyboard interaction affected one Page method rather
-than every scenario. Transaction summary calculations remained testable as
-Flow behavior rather than becoming UI selector logic.
+Changing a keyboard interaction affects one Page method rather than every
+scenario. Transaction calculations remain Flow behavior instead of leaking into
+selectors or Gherkin.
 
-### Deterministic setup
+The same ownership discipline now applies to data. Excel and managed Feature
+blocks own scenario actions and expectations. `data/environments/` owns only
+shared, non-secret onboarding values. Locator YAML owns UI selectors. This avoids
+turning one spreadsheet into an untyped configuration database.
 
-Clearing package data before every scenario costs time, but it made onboarding,
-custom category creation, and summary baselines repeatable. Explicitly entering
-the user name, currency, budget, and SMS preference also tests the real first-run
-path instead of bypassing it with Skip.
+### Deterministic, environment-aware setup
 
-### Assertions beyond a save confirmation
+Clearing app storage before every scenario is slower, but makes onboarding,
+custom categories, and summary baselines repeatable. `--env` overrides
+`TEST_ENV`, which overrides the `preprod` default; invalid names or YAML schemas
+fail before Appium starts. Page Objects remain unaware of environment names, and
+the Flow verifies the selected name, currency symbol, and SMS Reader state.
 
-The successful scenarios do not stop when the Add Transaction form closes.
-They verify date, amount, category, and time in Transactions, then check income,
-expense, balance, and budget percentage on Home. This caught integration issues
-that a toast or Recent Transactions assertion alone would miss.
+### Multi-device execution with explicit resource isolation
 
-### Failure evidence
+The matrix runner discovers Android emulators/devices, iOS simulators, and
+paired iOS devices. It starts one pytest worker per target and supports two
+different goals: `replicate` validates compatibility on every target, while
+`split` shortens feedback by assigning each selected case exactly once.
 
-Allure uses the original BDD Feature and Scenario names. A call-stage failure
-saves a local PNG and attaches it to the result without wrapping test bodies or
-hiding the original traceback.
+Per-worker Android `systemPort`, iOS WDA/MJPEG ports, derived-data paths, logs,
+screenshots, JUnit, and Allure directories prevent the most common concurrent
+session collisions and keep failures attributable.
+
+### Reports identify the tested build
+
+Environment alone is not enough evidence. The runtime resolves app version from
+an explicit override, Appium capability, Android installed-package metadata, or
+iOS bundle metadata. Each Allure case and worker property file records the app
+version beside platform, device, OS, and UDID. Matrix aggregation preserves
+different versions per device instead of inventing one shared build identity.
+
+### Living documentation has a bounded automation boundary
+
+Task 14 validates the entire Excel registry, updates only managed Scenario
+blocks, preserves unchanged blocks byte-for-byte, and rolls back Feature writes
+when collection fails. `run_changed_matrix.sh` applies added/modified cases only
+after preflight, then replicates them across selected devices and returns a
+machine-meaningful health status.
+
+The engine deliberately stops at executable Gherkin. It does not invent Step,
+Flow, Page, or locator code and does not write test results back into Excel.
+Those boundaries keep generated changes reviewable.
+
+### Failure evidence remains primary
+
+Allure keeps the original BDD Feature and Scenario names. Call-stage failures
+attach screenshots without replacing the original traceback. Task 13 adds one
+advisory category and next action, using deterministic local signatures first
+and an explicitly enabled LLM only for ambiguous evidence. AI output never
+changes pass/fail status, retries a test, or claims to be the confirmed cause.
 
 ## What Was Harder Than Expected
 
-### Flutter accessibility semantics
+### Flutter accessibility semantics and keyboard state
 
-Some controls expose strong accessibility IDs, while others are merged into
-large semantics nodes or expose only positional text fields. The suite contains
-scoped XPath fallbacks as a result. They are isolated in YAML, but remain more
-sensitive to app layout changes than stable semantic IDs.
+Some controls expose stable accessibility IDs, while others are merged into
+large semantics nodes or expose only positional text fields. Scoped XPath
+fallbacks remain necessary. On both setup and transaction forms, keyboard state
+also affects sliders and controls; completing the IME action is more reliable
+than tapping arbitrary screen coordinates.
 
-### Keyboard state
+### Transitions and horizontal controls
 
-The Android keyboard blocked both the onboarding budget slider and Add
-Transaction controls. Sending the IME Done action after amount, note, tags, and
-category-name input proved more reliable than tapping arbitrary coordinates.
+The custom-category entry is at the end of a horizontal list and requires a
+bounded swipe, creation flow, Back navigation, and chip selection. After Save,
+the test must wait for Home before looking for another same-named shortcut;
+otherwise a control on the closing form can be matched accidentally.
 
-### Horizontal categories
+### Device concurrency does not remove infrastructure state
 
-The `New` category entry sits at the far right of a horizontal list. Creating
-`baby cost` required a controlled swipe, category creation, Back navigation,
-and selection of a chip that may display only `baby` because of its fixed width.
+Unique ports prevent deterministic collisions, but WebDriverAgent still has its
+own lifecycle. During final verification, an iOS session started immediately
+after a previous matrix run failed in setup with `ECONNREFUSED 127.0.0.1:8100`.
+The same command passed once WDA had fully restarted. The framework correctly
+reported an `Env` setup failure and `unresolved` app version instead of hiding it
+behind a blind retry. A future readiness probe should target this transition
+explicitly.
 
-### Transition races
+### Keeping examples honest
 
-When two transactions were added in one scenario, the second Home shortcut
-could match a same-named tab on the form that was still closing. Waiting for
-Home after a successful save removed the race and made sequential transactions
-reliable.
+The intentional `5002` versus `5001.0` mismatch is useful in a failure-demo
+video, but it also means a normal smoke command is intentionally red. Reports
+and documentation must distinguish fault injection from product or framework
+regressions. A reusable project should generate this mismatch from temporary
+demo data rather than keep the default registry unhealthy.
 
 ## Current Limitations
 
-- Each device worker is serial; matrix mode adds device-level concurrency but
-  does not parallelize multiple Appium sessions on the same target.
-- Full package reset makes each scenario slower than a targeted state fixture.
-- iOS locators and all seven scenarios are validated on an iPhone 17 simulator
-  running iOS 26.5; other device profiles and locale settings remain unverified.
-- Photo attachment and broader Settings/Analytics behavior are outside the
-  seven-scenario scope.
-- GitHub-hosted E2E requires an externally downloadable APK through the
-  `TRACKIFY_APK_URL` secret; without it, CI performs unit tests and collection.
-- Task 14 is intentionally one-way: Excel updates managed Scenario blocks, but
-  results are not written back and locators are never self-healed.
-- Task 13 is advisory rather than autonomous. Its MiniMax-compatible fallback
-  was live-validated, but strict JSON failures still degrade to `Unknown`; a
-  larger real-failure sample is needed before changing thresholds or policy.
-- `summary.xlsx` generation was intentionally deferred from Task 11.
+- Each worker is serial; matrix mode provides device-level concurrency, not
+  multiple Appium sessions on one target.
+- Full app reset makes each scenario slower than a targeted state fixture.
+- The committed Income demo mismatch intentionally prevents a fully green smoke
+  matrix until the input and expectation are aligned.
+- iOS coverage is validated on one iPhone 17 simulator with iOS 26.5; broader
+  device sizes, locales, and physical-device signing paths need more evidence.
+- `prod` currently changes local app storage only. The profile does not authorize
+  destructive execution against a future shared production backend.
+- Task 14 remains one-way and does not generate implementation or self-heal
+  locators.
+- Task 13 remains advisory. Its opt-in compatible-model fallback needs a larger
+  real-failure sample before changing confidence thresholds.
+- GitHub-hosted E2E still requires externally supplied app artifacts.
 
 ## AI Assistance
 
-AI helped inspect the repository, translate the specification into BDD and Page
-objects, reason about Flutter/Appium locator behavior, and shorten debugging
-cycles. Each suggested interaction was checked against the live emulator. The
-most useful feedback came from actual failures: category navigation, keyboard
-state, date/time persistence, and post-save races all required evidence from the
-running app rather than accepting generated code at face value.
+AI helped turn requirements into explicit ownership rules, generate test and
+documentation drafts, inspect Appium evidence, and shorten debugging loops. The
+useful work was not accepting generated code quickly; it was comparing each
+proposal with live page state, command output, and report artifacts.
 
-The same boundary applies inside Task 13: deterministic signatures handle known
-failure shapes first, while MiniMax is used only for ambiguous evidence. Live
-integration verified authentication, TLS trust, request/response compatibility,
-and safe degradation, but model advice remains a hypothesis attached to the
-original failure rather than an automated verdict.
+That boundary is visible in both extension tasks. The sync engine generates only
+deterministic managed text and validates it with pytest collection. Failure
+triage treats model output as an attached hypothesis. Environment profiles and
+app metadata use strict parsers and platform tools rather than asking a model to
+guess runtime identity.
 
 ## Next Improvements
 
-1. Calibrate Task 13 signature precision against a larger set of real failures
-   while keeping every verdict advisory and the LLM fallback opt-in.
-2. Ask the app team for stable semantic IDs on text fields, date groups, and
+1. Move the intentional Income mismatch into a temporary demo workbook or fault-
+   injection script so the committed default smoke suite stays green.
+2. Add a bounded WDA readiness/recovery preflight that distinguishes startup
+   transition from a persistent XCUITest configuration failure.
+3. Ask the app team for stable semantic IDs on text fields, date groups, and
    bottom navigation.
-3. Validate the iOS locator set on a simulator and isolate native picker
-   differences inside the Page layer.
-4. Introduce a faster state-seeding strategy only after preserving one clean
-   first-install smoke path.
-5. Publish the APK through an authenticated build artifact service so mobile
-   E2E can run on every trusted branch build.
-6. Replace the local Excel registry with a reviewed test-management API only
-   when multiple teams need concurrent editing, permissions, and audit history.
+4. Introduce faster state seeding only after preserving at least one clean-
+   install onboarding smoke path per environment.
+5. Publish signed Android/iOS artifacts through an authenticated build service
+   so CI can report the same app-version identity as local matrices.
+6. Expand environment profiles only when a real shared backend creates new
+   configuration needs; keep credentials in secret stores, never profile YAML.
+7. Replace the local Excel registry with a test-management API only when
+   concurrent editing, permissions, and audit history justify the complexity.
 
-The main lesson is that a small suite becomes valuable when its assertions
-follow data across screens. Seven scenarios with deterministic state and strong
-downstream checks provided more signal than a larger set of shallow UI scripts.
+The main lesson is that test-platform value comes from explicit boundaries and
+attributable evidence. A small suite that identifies its environment, build,
+device, data source, and failure phase provides more engineering signal than a
+larger set of shallow UI scripts.
