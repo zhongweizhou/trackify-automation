@@ -28,10 +28,10 @@ state, cross-platform execution, and attributable reports.
 | Contract-driven BDD | Seven versioned scenarios, a controlled Gherkin vocabulary, reusable steps, and strict pytest markers |
 | Layered architecture | Gherkin → Step Definitions → Flow → Page Object → Appium Driver; each layer has a clear ownership boundary |
 | Cross-platform locator strategy | Platform-specific YAML locators with `accessibility_id` first and bounded fallback strategies for Flutter semantics |
-| Deterministic isolation | App state is reset before every scenario, then the same required onboarding baseline is completed |
+| Deterministic isolation | App state is reset before every scenario, then onboarding uses the validated `test`, `preprod`, or `prod` profile |
 | Multi-device concurrency | One command discovers all ready Android and iOS targets, then either replicates or shards the suite across isolated workers |
 | Collision-free Appium sessions | Unique Android `systemPort`, iOS WDA/MJPEG ports, and WDA derived-data paths per device |
-| Traceable reporting | Environment, platform, device, OS version, UDID, per-case result, JUnit, logs, screenshots, and merged Allure results |
+| Traceable reporting | Environment, app version, platform, device, OS version, UDID, per-case result, JUnit, logs, screenshots, and merged Allure results |
 | Advisory failure triage | Deterministic local signatures classify the first failed phase; an explicitly enabled Claude fallback handles ambiguous failures |
 | Excel-managed living cases | A validated registry incrementally updates only managed Gherkin blocks, preserves unchanged bytes, and can run only changed scenarios |
 | Reviewable engineering process | The technical specification defines layer rules, acceptance criteria, anti-patterns, and task-sized commits |
@@ -282,6 +282,46 @@ Commands below use `uv`. If the repository already has a `.venv` but `uv` is
 not installed, replace `uv run pytest` with
 `.venv/bin/python -m pytest`.
 
+#### Select an environment profile
+
+The same seven scenarios support three validated onboarding profiles:
+
+| `--env` | Name | Currency | Bank SMS Reader |
+|---|---|---|---|
+| `test` | `Rose` | `$ US Dollar` | enabled |
+| `preprod` (default) | `Kimbal` | `$ US Dollar` | enabled |
+| `prod` | `Kimi` | `$ US Dollar` | enabled |
+
+```bash
+# Direct pytest on one configured device
+uv run pytest --env test -m "not unit"
+uv run pytest --env preprod -m "not unit"
+uv run pytest --env prod -m "not unit"
+
+# Matrix execution on every discovered device
+.venv/bin/python scripts/run_device_matrix.py --env test
+.venv/bin/python scripts/run_device_matrix.py --env preprod
+.venv/bin/python scripts/run_device_matrix.py --env prod
+```
+
+Selection precedence is `--env` > `TEST_ENV` > `preprod`. Profile files live
+under `data/environments/` and contain non-secret shared onboarding values only;
+business inputs and expected results remain in Excel/Gherkin. Unsupported names
+and invalid profile schemas fail before Appium starts.
+
+`prod` is currently safe only because these scenarios clear and modify local
+Trackify storage. Reassess destructive execution before the app is connected to
+a shared production backend or credentials.
+
+Completed runs also require a concrete app version. Resolution uses
+`APP_VERSION`, then Appium capabilities, Android installed-package metadata, or
+iOS `.app`/`.ipa` metadata. Set an explicit override when artifact metadata is
+unavailable:
+
+```bash
+APP_VERSION=1.2.3 uv run pytest --env test -m "not unit"
+```
+
 #### Command index
 
 The table below is the complete command-oriented entry point for the current
@@ -297,7 +337,7 @@ test suite. Detailed examples follow it.
 | Apply Excel drift | `uv run python scripts/sync_engine.py --apply` | Atomically update managed Feature blocks and collect pytest |
 | Apply + run changes | `uv run python scripts/sync_engine.py --apply --run-changed` | Update, then execute only added/modified active scenarios |
 | Changed cases on all devices | `./scripts/run_changed_matrix.sh` | Check, sync, then run every added/modified case concurrently on every discovered Android and iOS device |
-| Default single device | `uv run pytest -m "not unit"` | Run all 7 scenarios on the default Android target |
+| Default single device | `uv run pytest --env preprod -m "not unit"` | Run all 7 scenarios on the default Android target and profile |
 | Explicit Android device | `PLATFORM=android DEVICE_UDID=<udid> APP_PATH="$PWD/app/app-release.apk" uv run pytest -m "not unit"` | Run all scenarios on one Android emulator or physical device |
 | Explicit iOS simulator | `PLATFORM=ios DEVICE_UDID=<udid> APP_PATH="$PWD/app/Runner.app" uv run pytest -m "not unit"` | Run all scenarios on one booted iOS simulator |
 | Feature | `uv run pytest tests/features/add_transaction.feature -q` | Run one feature file (5 Add Transaction scenarios) |
@@ -535,12 +575,13 @@ report/device-matrix/<environment>/<timestamp>/
     └── screenshots/
 ```
 
-Every Allure test result includes the environment, platform, device name,
-operating-system version, and UDID. The matrix summary reports passed, failed,
-error, and skipped counts separately for each device. It also records the
-distribution strategy and the exact node IDs assigned to each device. If there
-are more devices than selected tests in `split` mode, excess devices remain
-idle instead of starting empty pytest sessions.
+Every Allure test result includes the environment, tested app version, platform,
+device name, operating-system version, and UDID. Each worker writes the same
+fields to `environment.properties`; the combined matrix summary preserves the
+app version per device instead of assuming Android and iOS artifacts are
+identical. It also records passed/failed/error/skipped counts, distribution
+strategy, and exact node IDs. In `split` mode, excess devices remain idle rather
+than starting empty pytest sessions.
 
 See the committed [preprod matrix report example](docs/reports/device-matrix-preprod-sample.md),
 captured from a real run of all seven scenarios on Android 17 and iOS 26.5.

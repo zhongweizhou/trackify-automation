@@ -82,7 +82,9 @@ trackify-automation/
 │
 ├── utils/                           # Cross-cutting helpers
 │   ├── __init__.py
+│   ├── app_metadata.py              # Strict Android/iOS app-version resolver
 │   ├── driver.py                    # Appium driver factory
+│   ├── environment_profile.py       # test/preprod/prod profile validation
 │   ├── locator_loader.py            # YAML → dict
 │   ├── system_dialogs.py            # Targeted Android permission handling
 │   └── config.py                    # Reads platform / device from pytest.ini
@@ -93,6 +95,10 @@ trackify-automation/
 │   └── triage.py                    # LLM-based failure categorizer
 │
 ├── data/
+│   ├── environments/                # Non-secret shared onboarding profiles
+│   │   ├── test.yaml
+│   │   ├── preprod.yaml
+│   │   └── prod.yaml
 │   ├── test_cases.xlsx              # Manual test case registry (Task 14 — sync source)
 │   ├── test_cases_template.xlsx     # Reusable corrected seven-case baseline
 │   └── .backup/                     # Auto-created by sync_engine.py before each write
@@ -538,7 +544,7 @@ def transactions_flow(transactions_page) -> TransactionsFlow:
 **Why fixture wiring matters**:
 - Without it, step defs end up calling `HomePage(driver())` themselves → no teardown, leaked sessions.
 - The `reset_app_state` fixture is `autouse=True` so every test starts from a clean Hive.
-- After reset, every feature `Background` completes the same three ordered first-run stages before business actions begin: save name `Kimbal`; select `$ US Dollar` and monthly budget `30000`; enable Bank SMS Reader and tap `Get Started`.
+- After reset, every feature `Background` completes the same three ordered first-run stages before business actions begin: save the selected environment profile name; select its currency and monthly budget `30000`; apply its Bank SMS Reader state and tap `Get Started`.
 - Never use onboarding `Skip` as a test precondition. Skipping leaves profile, currency, budget, and tracking preferences undefined.
 - Every Page Object wait checks for the Android system prompt `Allow Trackify to send you notifications?` and clicks `Allow` before continuing. The handler matches notification copy specifically and does not accept SMS or other permission prompts.
 
@@ -680,9 +686,9 @@ Scenario: Add income
 ```gherkin
 # Used once per .feature file in a Background: block
 Given app is launched with a clean database
-Given user enters name "<name:str>" and continues
-Given user selects currency "<currency:str>" and sets monthly budget "<monthly_budget:int>"
-Given user enables Bank SMS Reader and gets started
+Given user enters the configured environment name and continues
+Given user selects the configured environment currency and sets monthly budget "<monthly_budget:int>"
+Given user applies the configured Bank SMS Reader setting and gets started
 
 Given user is on the Home page
 Given user is on the Add Transaction page
@@ -757,9 +763,9 @@ Feature: Add Transaction
 
   Background:
     Given app is launched with a clean database
-    And user enters name "Kimbal" and continues
-    And user selects currency "$ US Dollar" and sets monthly budget "30000"
-    And user enables Bank SMS Reader and gets started
+    And user enters the configured environment name and continues
+    And user selects the configured environment currency and sets monthly budget "30000"
+    And user applies the configured Bank SMS Reader setting and gets started
     And user is on the Home page
 
   @smoke @p0
@@ -834,9 +840,9 @@ Feature: Transactions List
 
   Background:
     Given app is launched with a clean database
-    And user enters name "Kimbal" and continues
-    And user selects currency "$ US Dollar" and sets monthly budget "30000"
-    And user enables Bank SMS Reader and gets started
+    And user enters the configured environment name and continues
+    And user selects the configured environment currency and sets monthly budget "30000"
+    And user applies the configured Bank SMS Reader setting and gets started
     And user is on the Home page
 
   @p1 @filter
@@ -913,7 +919,7 @@ adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 | 6 | Add Transaction page + Locator | `page/add_transaction_page.py`, `locator/add_transaction.yaml` | `add_tx.add_expense(amount=100, category="Food")` works | `feat(page): add transaction page (all 3 types)` |
 | 7 | Add Transaction flow | `flow/add_transaction_flow.py` | `flow.add_expense(...)` orchestrates Page + returns new ID | `feat(flow): add transaction business logic` |
 | 8 | First BDD feature (Add Expense happy path) | `tests/features/add_transaction.feature`, `tests/step_defs/add_transaction_steps.py`, `conftest.py` (page/flow fixtures) | `pytest tests/features/add_transaction.feature -k "happy_path"` collects and runs **only** the "Add expense happy path" scenario from §6.7. Other 4 Add Transaction scenarios written but tagged `@skip` (or feature-level Background-only). Implements every §6.6 phrase used in this scenario. | `test(case): add transaction bdd (expense happy path)` |
-| 8a | First-run setup baseline | `locator/onboarding.yaml`, `page/onboarding_page.py`, `flow/app_setup_flow.py`, `conftest.py`, BDD `Background` blocks | Every business scenario completes `Kimbal` → `$ US Dollar` + `30000` → Bank SMS Reader enabled + `Get Started`; no test path taps onboarding `Skip`; Home shows `Kimbal` and `$` before business actions | `feat(setup): complete required first-run configuration` |
+| 8a | First-run setup baseline | `locator/onboarding.yaml`, `page/onboarding_page.py`, `flow/app_setup_flow.py`, `conftest.py`, BDD `Background` blocks | Every business scenario completes the selected environment name → configured currency + `30000` → configured Bank SMS Reader state + `Get Started`; no test path taps onboarding `Skip`; Home shows the selected name and currency symbol before business actions | `feat(setup): complete required first-run configuration` |
 | 8b | Remaining Add Transaction scenarios | `tests/features/add_transaction.feature`, `tests/step_defs/add_transaction_steps.py` | Un-skip the remaining **4 scenarios** from §6.7 (Add Income, Add Transfer, Validation, Custom Category). Implement the additional §6.6 phrases (`user selects type`, `user taps "Add new category"`, `user creates custom category`, `error message ... is shown for amount`, `no transaction appears ...`). Custom Category creates and selects `baby cost` with any icon/color. All **5 Add Transaction scenarios** pass. | `test(case): add transaction bdd (4 more scenarios + custom category)` |
 | 8c | Transaction persistence and Home summary assertions | `locator/home.yaml`, `locator/transactions.yaml`, `page/base_page.py`, `page/home_page.py`, `page/transactions_page.py`, `page/add_transaction_page.py`, `flow/add_transaction_flow.py`, `utils/system_dialogs.py`, Add Transaction BDD files | Every Add Transaction scenario verifies the matching Transactions date/amount/category/time and the `This Month` income, expense, balance, and half-up integer percentage. Transfer has no summary impact. Notification permission prompts are accepted globally. | `test(case): verify transaction persistence and monthly summary` |
 | 9 | Transactions page + flow | `page/transactions_page.py`, `flow/transactions_flow.py`, `locator/transactions.yaml`, Add Transaction date/time Page/Flow locators, `conftest.py` | Manual test: filter works and a transaction at `2025-05-06 9:00 AM` is grouped under `06 May 2025` | `feat(page): transactions page + flow` |
@@ -1283,6 +1289,44 @@ Acceptance criteria:
 ### 11.8 Reference
 
 For the broader Q1-Q6 roadmap, version-aware regression, and document-driven testing context, see [`docs/SCALING.md`](SCALING.md). Read it at Task 14 implementation time; it does not block Tasks 1-12.
+
+---
+
+## 12. Multi-Environment Execution and Report Identity
+
+### 12.1 Configuration Ownership
+
+- Supported values are exactly `test`, `preprod`, and `prod`.
+- Resolution precedence is pytest `--env`, then `TEST_ENV`, then `preprod`.
+- `data/environments/<env>.yaml` must contain exactly `schema_version`, `name`,
+  `currency`, and boolean `bank_sms_reader_enabled`; unknown/missing/invalid
+  fields fail before Appium driver creation.
+- Environment YAML is non-secret shared onboarding configuration. Excel and
+  managed Feature scenarios continue to own business inputs and expected
+  results. Locators remain in `locator/*.yaml`.
+- `prod` is permitted only while scenarios mutate local app storage. A future
+  shared production backend requires a new destructive-test safety review.
+
+### 12.2 Runtime Contract
+
+Feature Backgrounds use environment-aware steps for the profile name, currency,
+and SMS Reader state while keeping monthly budget `30000` explicit. Page Objects
+set UI state but do not know environment names. The Flow verifies the requested
+SMS state plus the selected name and currency symbol on Home.
+
+App version resolution precedence is: non-empty `APP_VERSION`; supported Appium
+capabilities; Android `adb dumpsys package <package>` `versionName`; iOS
+`CFBundleShortVersionString` from `.app` or `.ipa`; otherwise an actionable
+configuration error. Completed runs must never silently report `unknown`.
+
+### 12.3 Reporting Contract
+
+Every Allure case records Environment, App Version, Platform, Device, OS Version,
+and UDID. Worker `environment.properties` records the same identity. Matrix
+aggregation reads `App.Version` from each worker and preserves each version in
+`summary.md`, `summary.json`, and combined properties; it must not assume all
+platform artifacts share one version. Unsupported matrix/shell `--env` values
+return configuration exit code `2` before device execution.
 
 ---
 

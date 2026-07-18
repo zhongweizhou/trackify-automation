@@ -42,15 +42,35 @@ business assertions.
 `conftest.py` owns the Appium session and dependency graph. One driver session
 is shared for a pytest run. Before each scenario, the autouse fixture clears the
 Trackify package data and reactivates the app. Each scenario then completes the
-same required onboarding sequence:
+same required onboarding sequence using the validated profile selected by
+`--env` or `TEST_ENV`:
 
-1. enter `Kimbal`;
-2. select `$ US Dollar` and budget `30000`;
-3. enable Bank SMS Reader and tap Get Started.
+1. enter the profile name (`Rose`, `Kimbal`, or `Kimi`);
+2. select the profile currency and the scenario-owned budget `30000`;
+3. apply the profile Bank SMS Reader state and tap Get Started.
 
 The reset is deliberately expensive but deterministic. It prevents one
 scenario's Hive data, custom categories, or onboarding state from affecting the
 next scenario.
+
+## Environment and Build Identity
+
+`data/environments/{test,preprod,prod}.yaml` owns non-secret values shared by
+the onboarding Background. Excel/Gherkin continues to own scenario business
+inputs and expected results, so environment selection does not duplicate the
+case registry. Resolution is strict and deterministic: `--env` overrides
+`TEST_ENV`, which overrides the `preprod` default; invalid profiles fail before
+driver creation.
+
+After driver creation, `utils/app_metadata.py` resolves a non-empty tested app
+version from an explicit `APP_VERSION`, Appium capabilities, Android installed
+package metadata, or iOS bundle metadata. The resolved environment/build/device
+context is attached to every Allure case and written to each worker's
+`environment.properties`. Matrix aggregation reads each worker's version, so
+different Android and iOS builds remain visible rather than being collapsed.
+
+The current `prod` profile changes local app storage only. This is not blanket
+authorization for destructive tests against a future shared production backend.
 
 ## Locator Design
 
