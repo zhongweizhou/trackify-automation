@@ -20,6 +20,7 @@ report/changed-device-matrix/
 allure-results/
 allure-report/
 data/.backup/
+data/device_shards.local.yaml
 outputs/
 
 # IDE/editor

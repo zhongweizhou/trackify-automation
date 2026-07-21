@@ -1,7 +1,7 @@
 # Trackify 移动端 UI 自动化
 
 <p align="center">
-  <a href="README.md">English</a> | <strong>简体中文</strong> | <a href="README.zh-TW.md">繁體中文</a>
+  <a href="README.md">English</a> | <strong>简体中文</strong> | <a href="README.zh-HK.md">繁體中文</a>
 </p>
 
 > 面向 Trackify Flutter 个人财务应用的 AI 辅助端到端移动自动化框架。
@@ -397,6 +397,7 @@ transactions_grouped_by_date_with_section_headers
 |---|---|---|
 | `replicate`（默认） | A 跑 7 条，B 跑 7 条，共 14 次设备维度执行 | 验证不同平台/设备兼容性 |
 | `split` | A 跑 4 条，B 跑 3 条，共 7 次设备维度执行 | 缩短一整套测试的反馈时间 |
+| `mapped` | 按配置文件把指定用例固定分配到指定设备，并合并一份报告 | 可复现的 case-to-device 分片 |
 
 ```bash
 # 仅发现并列出设备，不执行测试
@@ -443,7 +444,29 @@ transactions_grouped_by_date_with_section_headers
   --env preprod \
   -- \
   -m smoke
+
+# 复制显式 case-to-device 配置，并将 device 改成实际 UDID
+cp data/device_shards.example.yaml data/device_shards.local.yaml
+
+# 预览显式分片，不启动 Appium 会话
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform android \
+  --distribution mapped \
+  --env preprod \
+  --shard-config data/device_shards.local.yaml \
+  --list
+
+# 执行显式分片，并生成一份合并的 Allure 报告
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform android \
+  --distribution mapped \
+  --env preprod \
+  --shard-config data/device_shards.local.yaml
 ```
+
+`data/device_shards.example.yaml` 中的 `cases` 可以写稳定用例 ID（例如
+`TC_ADD_TX_001`），也可以写完整 pytest node ID。`mapped` 模式要求当前
+pytest 选中的每条用例恰好配置一次，并且配置中的设备必须已被发现。
 
 ### 7. Allure 报告
 

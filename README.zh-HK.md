@@ -397,6 +397,7 @@ transactions_grouped_by_date_with_section_headers
 |---|---|---|
 | `replicate`（預設） | A 跑 7 條，B 跑 7 條，共 14 次裝置維度執行 | 驗證不同平台/裝置相容性 |
 | `split` | A 跑 4 條，B 跑 3 條，共 7 次裝置維度執行 | 縮短一整套測試的回饋時間 |
+| `mapped` | 按配置檔把指定用例固定分配到指定裝置，並合併一份報告 | 可重現的 case-to-device 分片 |
 
 ```bash
 # 僅發現並列出裝置，不執行測試
@@ -443,7 +444,29 @@ transactions_grouped_by_date_with_section_headers
   --env preprod \
   -- \
   -m smoke
+
+# 複製顯式 case-to-device 配置，並將 device 改成實際 UDID
+cp data/device_shards.example.yaml data/device_shards.local.yaml
+
+# 預覽顯式分片，不啟動 Appium 會話
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform android \
+  --distribution mapped \
+  --env preprod \
+  --shard-config data/device_shards.local.yaml \
+  --list
+
+# 執行顯式分片，並生成一份合併的 Allure 報告
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform android \
+  --distribution mapped \
+  --env preprod \
+  --shard-config data/device_shards.local.yaml
 ```
+
+`data/device_shards.example.yaml` 的 `cases` 可以寫穩定用例 ID（例如
+`TC_ADD_TX_001`），也可以寫完整 pytest node ID。`mapped` 模式要求當前
+pytest 選中的每條用例恰好配置一次，而且配置中的裝置必須已被發現。
 
 ### 7. Allure 報告
 
