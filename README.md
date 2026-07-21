@@ -123,7 +123,7 @@ for the Simulator architecture.
 
 ### 3. Boot and verify targets
 
-Start the desired emulators/simulators before running the commands below.
+Manual target management remains available:
 
 ```bash
 # Ready Android targets must show the state "device"
@@ -132,6 +132,13 @@ adb devices -l
 # Ready iOS Simulators must show the state "Booted"
 xcrun simctl list devices booted
 ```
+
+For an automated lifecycle, use `--prepare-devices` during the actual run. No
+device name is required: each requested platform reuses one running virtual
+target or deterministically selects and boots an installed target. The runner
+then replaces the app from `app/`, runs pytest, waits 60 seconds, and shuts down
+the selected Android emulator or iOS Simulator. Real devices are never started
+or stopped automatically.
 
 ### 4. Start Appium in a dedicated terminal
 
@@ -150,6 +157,9 @@ In a second terminal, from the repository root:
 
 ```bash
 .venv/bin/python scripts/run_device_matrix.py --list
+
+# List installed virtual targets and show the zero-config automatic choices
+.venv/bin/python scripts/run_device_matrix.py --list-available-devices
 
 # Preview both device discovery and split assignment without running tests
 .venv/bin/python scripts/run_device_matrix.py \
@@ -170,7 +180,31 @@ This command does not install the app or execute tests.
 .venv/bin/python scripts/run_device_matrix.py \
   --distribution split \
   --env preprod
+
+# Zero configuration: select one Android and one iOS target automatically
+.venv/bin/python scripts/run_device_matrix.py \
+  --prepare-devices \
+  --env preprod
+
+# Explicit target override for deterministic compatibility runs
+.venv/bin/python scripts/run_device_matrix.py \
+  --prepare-devices \
+  --android-avd Pixel_10 \
+  --ios-simulator "iPhone 17" \
+  --env preprod
+
+# Android-only lifecycle; use --shutdown-after 0 to keep it running for debug
+.venv/bin/python scripts/run_device_matrix.py \
+  --prepare-devices \
+  --platform android \
+  --shutdown-after 0 \
+  --env preprod
 ```
+
+`--android-avd` takes an AVD name from `emulator -list-avds`.
+`--ios-simulator` accepts an exact Simulator name or UDID. These preparation
+commands run on the machine executing the script; a remote Appium host must run
+the same script there or have its devices provisioned separately.
 
 The default `replicate` distribution validates the full suite on every device.
 Use `split` when the goal is reducing total suite duration by assigning a
@@ -346,6 +380,8 @@ test suite. Detailed examples follow it.
 | Replicate across devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod` | Run all 7 scenarios on every discovered Android and iOS target |
 | Split across devices | `.venv/bin/python scripts/run_device_matrix.py --distribution split --env preprod` | Split the selected suite across devices so each scenario runs exactly once |
 | Explicit mapped shards | `.venv/bin/python scripts/run_device_matrix.py --distribution mapped --shard-config data/device_shards.local.yaml --env preprod` | Run exactly the cases assigned to each configured device and merge one report |
+| List available devices | `.venv/bin/python scripts/run_device_matrix.py --list-available-devices` | Show installed targets, current state, UDID, and zero-config automatic choices |
+| Managed device lifecycle | `.venv/bin/python scripts/run_device_matrix.py --prepare-devices --env preprod` | Automatically choose/boot one target per platform, replace apps, run, wait 60s, then stop them |
 | Android matrix | `.venv/bin/python scripts/run_device_matrix.py --platform android --env preprod` | Run all connected Android targets concurrently |
 | iOS matrix | `.venv/bin/python scripts/run_device_matrix.py --platform ios --env preprod` | Run all booted iOS simulators and paired iOS devices concurrently |
 | Selected devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod --device <udid-1> --device <udid-2>` | Run only the listed devices; repeat `--device` as needed |
