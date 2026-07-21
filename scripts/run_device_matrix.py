@@ -18,15 +18,22 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from utils.environment_profile import SUPPORTED_ENVIRONMENTS
+from scripts.sync_engine import SyncError, changed_nodeids, parse_workbook
 
 DEFAULT_REPORT_ROOT = ROOT / "report" / "device-matrix"
 SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 UNIT_TEST_IGNORE = "--ignore=tests/unit"
+
+
+class ShardConfigError(ValueError):
+    """Raised when an explicit case-to-device mapping is invalid."""
 
 
 @dataclass(frozen=True)
@@ -43,6 +50,13 @@ class Device:
     def key(self) -> str:
         value = f"{self.platform.lower()}-{self.name}-{self.udid}"
         return SAFE_NAME.sub("-", value).strip("-.")
+
+
+@dataclass(frozen=True)
+class ShardConfig:
+    """Validated explicit device shard selectors, preserving file order."""
+
+    assignments: tuple[tuple[str, tuple[str, ...]], ...]
 
 
 @dataclass
@@ -280,6 +294,73 @@ def normalize_pytest_args(pytest_args: list[str]) -> list[str]:
     return normalized
 
 
+def load_shard_config(path: Path) -> ShardConfig:
+    """Load and strictly validate an explicit case-to-device YAML mapping."""
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ShardConfigError(f"cannot read shard config {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ShardConfigError(f"invalid YAML in shard config {path}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ShardConfigError("shard config must be a YAML mapping")
+    if payload.get("schema_version") != 1:
+        raise ShardConfigError("shard config schema_version must be 1")
+    raw_assignments = payload.get("assignments")
+    if not isinstance(raw_assignments, list) or not raw_assignments:
+        raise ShardConfigError("shard config assignments must be a non-empty list")
+
+    assignments: list[tuple[str, tuple[str, ...]]] = []
+    seen_devices: set[str] = set()
+    for index, raw_assignment in enumerate(raw_assignments, start=1):
+        if not isinstance(raw_assignment, dict):
+            raise ShardConfigError(f"assignment {index} must be a mapping")
+        if set(raw_assignment) != {"device", "cases"}:
+            raise ShardConfigError(
+                f"assignment {index} must contain only device and cases"
+            )
+        device = raw_assignment.get("device")
+        cases = raw_assignment.get("cases")
+        if not isinstance(device, str) or not device.strip():
+            raise ShardConfigError(
+                f"assignment {index} device must be a non-empty string"
+            )
+        device = device.strip()
+        if device in seen_devices:
+            raise ShardConfigError(f"device {device!r} is assigned more than once")
+        if not isinstance(cases, list) or not cases:
+            raise ShardConfigError(f"assignment {index} cases must be a non-empty list")
+        if any(not isinstance(case, str) or not case.strip() for case in cases):
+            raise ShardConfigError(f"assignment {index} cases must contain strings")
+        seen_devices.add(device)
+        assignments.append((device, tuple(case.strip() for case in cases)))
+    return ShardConfig(assignments=tuple(assignments))
+
+
+def resolve_shard_nodeids(
+    config: ShardConfig,
+    case_id_to_nodeid: dict[str, str],
+) -> dict[str, tuple[str, ...]]:
+    """Resolve stable scenario IDs while accepting exact pytest node IDs."""
+    resolved: dict[str, tuple[str, ...]] = {}
+    for device, selectors in config.assignments:
+        nodeids: list[str] = []
+        for selector in selectors:
+            nodeid = case_id_to_nodeid.get(
+                selector,
+                selector if "::" in selector else None,
+            )
+            if nodeid is None:
+                raise ShardConfigError(
+                    f"case {selector!r} is neither a known scenario ID "
+                    "nor a pytest node ID"
+                )
+            nodeids.append(nodeid)
+        resolved[device] = tuple(nodeids)
+    return resolved
+
+
 def extract_collected_nodeids(output: str) -> list[str]:
     """Extract ordered pytest node IDs from quiet collection output."""
     nodeids: list[str] = []
@@ -328,6 +409,50 @@ def split_nodeids(nodeids: list[str], shard_count: int) -> list[list[str]]:
     for index, nodeid in enumerate(nodeids):
         shards[index % len(shards)].append(nodeid)
     return shards
+
+
+def build_mapped_assignments(
+    devices: list[Device],
+    mapped_nodeids: dict[str, tuple[str, ...]],
+    nodeids: list[str],
+) -> list[DeviceAssignment]:
+    """Build explicit assignments and require every collected case exactly once."""
+    devices_by_udid = {device.udid: device for device in devices}
+    for udid in mapped_nodeids:
+        if udid not in devices_by_udid:
+            raise ShardConfigError(f"device {udid!r} is not discovered")
+
+    collected = set(nodeids)
+    assigned_to: dict[str, str] = {}
+    for udid, assigned_nodeids in mapped_nodeids.items():
+        for nodeid in assigned_nodeids:
+            previous = assigned_to.get(nodeid)
+            if previous is not None:
+                raise ShardConfigError(
+                    f"case {nodeid!r} is assigned more than once "
+                    f"({previous} and {udid})"
+                )
+            assigned_to[nodeid] = udid
+
+    unknown = sorted(set(assigned_to) - collected)
+    if unknown:
+        raise ShardConfigError(
+            "shard config contains cases that are not selected by pytest: "
+            + ", ".join(unknown)
+        )
+    missing = sorted(collected - set(assigned_to))
+    if missing:
+        raise ShardConfigError(
+            "selected cases are not assigned in shard config: " + ", ".join(missing)
+        )
+
+    return [
+        DeviceAssignment(
+            device=devices_by_udid[udid],
+            assigned_nodeids=tuple(assigned_nodeids),
+        )
+        for udid, assigned_nodeids in mapped_nodeids.items()
+    ]
 
 
 def build_assignments(
@@ -712,6 +837,16 @@ def write_summary(
             f"{result.errors} | {result.skipped} | {result.duration_seconds:.1f}s | "
             f"{result.status} |"
         )
+    mapped_results = [
+        result for result in results if result.assigned_nodeids is not None
+    ]
+    if distribution == "mapped" and mapped_results:
+        lines.extend(["", "## Explicit Case Assignments", ""])
+        for result in mapped_results:
+            lines.append(
+                f"- `{result.device_udid}` ({result.device_name}): "
+                + ", ".join(f"`{nodeid}`" for nodeid in result.assigned_nodeids or ())
+            )
 
     changed_cases = payload["changed_cases"]
     if changed_cases:
@@ -786,11 +921,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--platform", choices=("all", "android", "ios"), default="all")
     parser.add_argument(
         "--distribution",
-        choices=("replicate", "split"),
+        choices=("replicate", "split", "mapped"),
         default="replicate",
-        help="Run the selected suite on every device or split it across devices",
+        help=(
+            "Run on every device, automatically split across devices, or use "
+            "an explicit case-to-device mapping"
+        ),
     )
     parser.add_argument("--device", action="append", default=[], help="Only run a UDID")
+    parser.add_argument(
+        "--shard-config",
+        type=Path,
+        help="YAML case-to-device mapping used with --distribution mapped",
+    )
+    parser.add_argument(
+        "--case-registry",
+        type=Path,
+        default=ROOT / "data" / "test_cases.xlsx",
+        help="Excel registry used to resolve stable TC_* IDs in a shard config",
+    )
     parser.add_argument("--list", action="store_true", help="List targets without running")
     parser.add_argument("--appium-url", default="http://127.0.0.1:4723")
     parser.add_argument("--android-app", type=Path, default=ROOT / "app" / "app-release.apk")
@@ -816,6 +965,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.distribution == "mapped" and args.shard_config is None:
+        raise ValueError("--distribution mapped requires --shard-config")
+    if args.distribution != "mapped" and args.shard_config is not None:
+        raise ValueError("--shard-config can only be used with --distribution mapped")
     change_manifest = load_change_manifest(args.change_manifest)
     devices = discover_devices(args.platform, set(args.device))
     if not devices:
@@ -831,14 +984,33 @@ def main() -> int:
     normalized_pytest_args = normalize_pytest_args(args.pytest_args)
     collected_nodeids = (
         collect_test_nodeids(args)
-        if args.distribution == "split" or normalized_pytest_args
+        if args.distribution in {"split", "mapped"} or normalized_pytest_args
         else None
     )
-    assignments = build_assignments(
-        devices,
-        args.distribution,
-        collected_nodeids,
-    )
+    if args.distribution == "mapped":
+        config = load_shard_config(args.shard_config)
+        try:
+            rows = parse_workbook(args.case_registry)
+        except (OSError, SyncError, ValueError) as exc:
+            raise ShardConfigError(
+                f"cannot resolve stable case IDs from {args.case_registry}: {exc}"
+            ) from exc
+        case_id_to_nodeid = {
+            row.scenario_id: nodeid
+            for row, nodeid in zip(rows, changed_nodeids(rows), strict=True)
+        }
+        mapped_nodeids = resolve_shard_nodeids(config, case_id_to_nodeid)
+        assignments = build_mapped_assignments(
+            devices,
+            mapped_nodeids,
+            collected_nodeids or [],
+        )
+    else:
+        assignments = build_assignments(
+            devices,
+            args.distribution,
+            collected_nodeids,
+        )
     active_devices = [assignment.device for assignment in assignments]
     if args.distribution == "split":
         print(
@@ -857,6 +1029,18 @@ def main() -> int:
                 f"  - {device.platform} {device.name}: idle "
                 "(more devices than selected tests)"
             )
+    elif args.distribution == "mapped":
+        print(
+            f"[matrix] Using explicit case-to-device mapping for "
+            f"{len(collected_nodeids or [])} test(s):"
+        )
+        for assignment in assignments:
+            print(
+                f"  - {assignment.device.platform} {assignment.device.name} "
+                f"({assignment.device.udid}):"
+            )
+            for nodeid in assignment.assigned_nodeids or ():
+                print(f"      {nodeid}")
     elif collected_nodeids is not None:
         print(
             f"[matrix] Replicating {len(collected_nodeids)} selected test(s) "

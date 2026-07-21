@@ -1,7 +1,7 @@
 # Trackify Mobile UI Automation
 
 <p align="center">
-  <strong>English</strong> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-TW.md">繁體中文</a>
+  <strong>English</strong> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-HK.md">繁體中文</a>
 </p>
 
 > AI-assisted End-to-End mobile automation for **Trackify** (Flutter personal-finance tracker).
@@ -345,6 +345,7 @@ test suite. Detailed examples follow it.
 | Scenario | `uv run pytest -k "add_expense_happy_path" -q` | Run one generated pytest scenario name |
 | Replicate across devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod` | Run all 7 scenarios on every discovered Android and iOS target |
 | Split across devices | `.venv/bin/python scripts/run_device_matrix.py --distribution split --env preprod` | Split the selected suite across devices so each scenario runs exactly once |
+| Explicit mapped shards | `.venv/bin/python scripts/run_device_matrix.py --distribution mapped --shard-config data/device_shards.local.yaml --env preprod` | Run exactly the cases assigned to each configured device and merge one report |
 | Android matrix | `.venv/bin/python scripts/run_device_matrix.py --platform android --env preprod` | Run all connected Android targets concurrently |
 | iOS matrix | `.venv/bin/python scripts/run_device_matrix.py --platform ios --env preprod` | Run all booted iOS simulators and paired iOS devices concurrently |
 | Selected devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod --device <udid-1> --device <udid-2>` | Run only the listed devices; repeat `--device` as needed |
@@ -486,6 +487,7 @@ environment defaults to `preprod`.
 |---|---|---|
 | `replicate` (default) | A runs 7, B runs 7; 14 device-case executions | Cross-platform/device compatibility coverage |
 | `split` | A runs 4, B runs 3; 7 device-case executions | Faster feedback for one logical suite |
+| `mapped` | The configured cases run only on their assigned devices | Reproducible ownership of case shards and one merged report |
 
 ```bash
 # Preview the discovered matrix without running tests
@@ -524,6 +526,32 @@ environment defaults to `preprod`.
   -- \
   -m smoke
 
+# Prepare an explicit case-to-device mapping (edit the UDIDs after copying)
+cp data/device_shards.example.yaml data/device_shards.local.yaml
+
+# Preview the exact configured mapping without starting Appium sessions
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform android \
+  --distribution mapped \
+  --env preprod \
+  --shard-config data/device_shards.local.yaml \
+  --list
+
+# Run the configured mapping and produce one merged Allure report
+.venv/bin/python scripts/run_device_matrix.py \
+  --platform android \
+  --distribution mapped \
+  --env preprod \
+  --shard-config data/device_shards.local.yaml
+```
+
+`data/device_shards.example.yaml` accepts stable case IDs such as
+`TC_ADD_TX_001` or complete pytest node IDs. `mapped` requires every selected
+pytest case to be assigned exactly once, and every configured device to be
+currently discoverable. The generated `summary.md` and `summary.json` retain
+the exact case-to-device assignment.
+
+```bash
 # Run one device by UDID
 .venv/bin/python scripts/run_device_matrix.py \
   --env preprod \
