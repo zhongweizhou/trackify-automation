@@ -134,15 +134,21 @@ xcrun simctl list devices booted
 等待 60 秒，再關閉選中的 Android 虛擬機或 iOS 模擬器。真實裝置不會被自動
 啟動或關閉。
 
-### 4. 在獨立終端啟動 Appium
+### 4. Appium 生命週期
 
-Android SDK 環境變量必須在啟動 Appium 的同一個終端中設置。啟動後保持該
-程序執行：
+啟動裝置或執行 pytest 前，Runner 會先檢查 Appium `/status`。如果本機已有
+ready 的 Appium，會直接重用；如果本機服務未啟動，矩陣執行會自動啟動，並將
+日誌寫入 `report/appium/appium.log`，直到返回 `ready: true`。如需強制要求手動
+啟動，可傳入 `--no-auto-start-appium`。命令開始前已存在的 Appium 不會被關閉；由 Runner
+自動啟動的 Appium 會在測試結束等待 `--shutdown-after`（預設 60 秒）後關閉。
+
+遠端 Appium 伺服器需要在遠端主機手動啟動。本機手動啟動時，請在同一個終端
+設定 Android SDK 環境變量：
 
 ```bash
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-appium
+appium --address 127.0.0.1 --port 4723
 ```
 
 ### 5. 預檢本次執行裝置
@@ -234,7 +240,8 @@ Allure 報告，以及失敗階段截圖。可以與儲存庫內提交的
 | 現象 | 排查方式 |
 |---|---|
 | 沒有發現裝置 | 執行 `adb devices -l` 和 `xcrun simctl list devices booted`，啟動或重連目標 |
-| Appium connection refused | 確認獨立終端中的 `appium` 仍在執行，並監聽 `4723` |
+| Appium connection refused | 矩陣命令可以自動啟動本機服務；直接執行 pytest 時請在 `4723` 啟動 Appium，或傳入 `--appium-url` |
+| Appium `/status` 返回 502 | 使用 `curl --noproxy '*' http://127.0.0.1:4723/status` 驗證本機端點，並檢查 `report/appium/appium.log` |
 | 找不到 Android SDK | 啟動 Appium 前設置 `ANDROID_HOME`、`ANDROID_SDK_ROOT`，然後重啓 Appium |
 | 找不到應用包 | 從儲存庫根目錄確認 `app/app-release.apk` 和/或 `app/Runner.app` 存在 |
 | 缺少 XCUITest | 執行 `appium driver install xcuitest` |
@@ -695,13 +702,19 @@ uv run python scripts/sync_engine.py --watch --apply
 ```
 
 `run_changed_matrix.sh` 是推薦的跨裝置變化健康門禁。它讀取機器可解析的變化
-清單，在寫入前發現裝置並檢查 Appium，原子應用通過驗證的 Feature 變化，然後
-固定使用矩陣 `replicate` 模式：每條新增/修改的 active 用例都會在每台選中
-裝置執行，而不是被拆分到不同裝置。
+清單，預覽裝置，原子應用通過驗證的 Feature 變化，然後固定使用矩陣
+`replicate` 模式。委託的矩陣 Runner 會自動檢查或啟動本機 Appium，因此不需要
+提前手動啟動本機服務。
 
 ```bash
 # 預設：preprod，所有已發現的 Android + iOS 裝置
 ./scripts/run_changed_matrix.sh
+
+# 啟動/重用指定 Android 和 iOS 模擬器，安裝 App，執行後等待 60 秒清理
+./scripts/run_changed_matrix.sh \
+  --prepare-devices \
+  --android-avd Pixel_10 \
+  --ios-simulator "iPhone 17"
 
 # 只在全部 Android 裝置執行
 ./scripts/run_changed_matrix.sh --platform android

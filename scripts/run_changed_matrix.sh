@@ -16,6 +16,11 @@ IOS_REAL_APP=""
 REPORT_ROOT="$ROOT_DIR/report/changed-device-matrix"
 PYTHON_BIN="${PYTHON_BIN:-}"
 DEVICE_ARGS=()
+PREPARE_DEVICES=false
+ANDROID_AVD_ARGS=()
+IOS_SIMULATOR_ARGS=()
+DEVICE_BOOT_TIMEOUT=120
+SHUTDOWN_AFTER=60
 
 usage() {
   cat <<'EOF'
@@ -35,6 +40,11 @@ Options:
   --ios-real-app PATH   Signed .ipa or .app for physical iOS devices
   --report-root PATH    Report parent directory
   --python PATH         Python interpreter (default: .venv/bin/python)
+  --prepare-devices     Boot/reuse virtual targets, install apps, then clean up
+  --android-avd NAME    Android AVD to prepare; repeat for multiple AVDs
+  --ios-simulator NAME  iOS Simulator name or UDID; repeat for multiple targets
+  --device-boot-timeout SEC  Boot wait timeout (default: 120)
+  --shutdown-after SEC  Cleanup delay after tests (default: 60)
   -h, --help            Show this help
 
 Exit codes:
@@ -103,6 +113,30 @@ while [[ $# -gt 0 ]]; do
       PYTHON_BIN="$2"
       shift 2
       ;;
+    --prepare-devices)
+      PREPARE_DEVICES=true
+      shift
+      ;;
+    --android-avd)
+      require_value "$@"
+      ANDROID_AVD_ARGS+=(--android-avd "$2")
+      shift 2
+      ;;
+    --ios-simulator)
+      require_value "$@"
+      IOS_SIMULATOR_ARGS+=(--ios-simulator "$2")
+      shift 2
+      ;;
+    --device-boot-timeout)
+      require_value "$@"
+      DEVICE_BOOT_TIMEOUT="$2"
+      shift 2
+      ;;
+    --shutdown-after)
+      require_value "$@"
+      SHUTDOWN_AFTER="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -122,6 +156,11 @@ fi
 
 if [[ "$PLATFORM" != "all" && "$PLATFORM" != "android" && "$PLATFORM" != "ios" ]]; then
   echo "[changed-matrix] ERROR: --platform must be all, android, or ios." >&2
+  exit 2
+fi
+
+if [[ "$PREPARE_DEVICES" != true && ( ${#ANDROID_AVD_ARGS[@]} -gt 0 || ${#IOS_SIMULATOR_ARGS[@]} -gt 0 ) ]]; then
+  echo "[changed-matrix] ERROR: --android-avd and --ios-simulator require --prepare-devices." >&2
   exit 2
 fi
 
@@ -189,6 +228,8 @@ MATRIX_ARGS=(
   --platform "$PLATFORM"
   --distribution replicate
   --appium-url "$APPIUM_URL"
+  --auto-start-appium
+  --shutdown-after "$SHUTDOWN_AFTER"
   --android-app "$ANDROID_APP"
   --ios-app "$IOS_APP"
   --report-root "$REPORT_ROOT"
@@ -201,26 +242,23 @@ fi
 if [[ ${#DEVICE_ARGS[@]} -gt 0 ]]; then
   MATRIX_ARGS+=("${DEVICE_ARGS[@]}")
 fi
+PREFLIGHT_ARGS=("${MATRIX_ARGS[@]}")
+if [[ "$PREPARE_DEVICES" == true ]]; then
+  MATRIX_ARGS+=(
+    --prepare-devices
+    --device-boot-timeout "$DEVICE_BOOT_TIMEOUT"
+    "${ANDROID_AVD_ARGS[@]}"
+    "${IOS_SIMULATOR_ARGS[@]}"
+  )
+  PREFLIGHT_ARGS+=(--list-available-devices)
+else
+  PREFLIGHT_ARGS+=(--list)
+fi
 
 if [[ "$RUNNABLE_CHANGES" -gt 0 ]]; then
   echo "[changed-matrix] Preflight: discovering selected devices."
   "$PYTHON_BIN" "$ROOT_DIR/scripts/run_device_matrix.py" \
-    "${MATRIX_ARGS[@]}" --list
-
-  if ! "$PYTHON_BIN" - "$APPIUM_URL" <<'PY'
-import sys
-
-from scripts.run_device_matrix import check_appium
-
-try:
-    check_appium(sys.argv[1])
-except RuntimeError as exc:
-    print(f"[changed-matrix] ERROR: {exc}", file=sys.stderr)
-    raise SystemExit(2) from exc
-PY
-  then
-    exit 2
-  fi
+    "${PREFLIGHT_ARGS[@]}"
 
   # Refresh after preflight so the applied and executed selection is current.
   refresh_manifest

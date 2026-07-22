@@ -895,11 +895,11 @@ These run once on the developer's machine before Task 1. They produce no commit.
 npm install -g appium                              # CLI
 appium driver install uiautomator2                 # Android driver
 
-# 2. Start Appium server (background)
-appium &                                           # listens on :4723
+# 2. Optional manual Appium server (matrix runners can start it automatically)
+appium --address 127.0.0.1 --port 4723           # listens on :4723
 
-# 3. Verify the server is alive
-curl http://localhost:4723/status | jq .           # expects {"value":{"ready":true}}
+# 3. Verify the server when it is manually started
+curl --noproxy '*' http://localhost:4723/status | jq . # expects ready=true
 
 # 4. Verify the emulator + app package
 adb devices                                        # list attached devices
@@ -907,7 +907,9 @@ adb install -r -t app/app-release.apk              # install Trackify
 adb shell pm list packages | grep com.blixcode.trackify # confirm pkg present
 ```
 
-**If any of these fail, fix before Task 1.** The Day 0 failures (server not running, package missing) are the #1 cause of "pytest hangs forever" symptoms later — not real bugs.
+**If any of these fail, fix before a direct pytest run.** Matrix runners check or
+start a local Appium server themselves; package and driver installation failures
+still need to be fixed before execution.
 
 | # | Task | Files touched | Acceptance criteria | Commit message |
 |---|------|---------------|---------------------|----------------|
@@ -1219,7 +1221,7 @@ uv run python scripts/sync_engine.py --watch --apply
 uv run python scripts/sync_engine.py --check --input /path/to/test_cases.xlsx
 ```
 
-`--check` is the default when neither `--check` nor `--apply` is supplied. `--check`, `--apply`, and machine-readable `--list-changed` are mutually exclusive. `--run-changed` requires `--apply`; it runs the exact pytest node IDs for added/modified active scenarios after a successful collection. `scripts/run_changed_matrix.sh` consumes `--list-changed`, preflights devices/Appium, applies once, and runs the exact changed subset in matrix `replicate` mode so every selected device validates every changed case. `--watch` without `--apply` reports drift only. Diff categories are `added`, `modified`, `deprecated`, `unchanged`, and `errors`; there is no implicit `deleted` category.
+`--check` is the default when neither `--check` nor `--apply` is supplied. `--check`, `--apply`, and machine-readable `--list-changed` are mutually exclusive. `--run-changed` requires `--apply`; it runs the exact pytest node IDs for added/modified active scenarios after a successful collection. `scripts/run_changed_matrix.sh` consumes `--list-changed`, previews devices, applies once, and delegates Appium check/start plus the exact changed subset to matrix `replicate` mode so every selected device validates every changed case. `--watch` without `--apply` reports drift only. Diff categories are `added`, `modified`, `deprecated`, `unchanged`, and `errors`; there is no implicit `deleted` category.
 
 Exit codes:
 - `0`: valid and no drift (`--check`), or apply succeeded and post-write collection passed.

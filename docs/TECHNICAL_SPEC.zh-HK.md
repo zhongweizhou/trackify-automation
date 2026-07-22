@@ -889,11 +889,11 @@ Feature: Transactions List
 npm install -g appium                              # CLI
 appium driver install uiautomator2                 # Android driver
 
-# 2. 啟動 Appium server(背景)
-appium &                                           # 監聽 :4723
+# 2. 可選：手動啟動 Appium（矩陣 Runner 可以自動啟動）
+appium --address 127.0.0.1 --port 4723           # 監聽 :4723
 
-# 3. 驗證 server 在線
-curl http://localhost:4723/status | jq .           # 期望 {"value":{"ready":true}}
+# 3. 手動啟動時驗證 server 在線
+curl --noproxy '*' http://localhost:4723/status | jq . # 期望 ready=true
 
 # 4. 驗證模擬器 + app 套件
 adb devices                                        # 列出已連線裝置
@@ -901,7 +901,8 @@ adb install -r -t app/app-release.apk              # 安裝 Trackify
 adb shell pm list packages | grep com.blixcode.trackify # 確認套件存在
 ```
 
-**任何一步失敗都在 Task 1 之前修復。** 第 0 天的失敗(server 沒執行、套件缺失)是後期「pytest 永遠卡住」現象的頭號原因 —— 不是真實 bug。
+**直接執行 pytest 前修復相關失敗。** 矩陣 Runner 會自動檢查或啟動本機
+Appium；應用套件和驅動安裝失敗仍必須在執行前修復。
 
 | # | 任務 | 涉及檔案 | 驗收標準 | 提交訊息 |
 |---|------|---------------|---------------------|----------------|
@@ -1213,7 +1214,7 @@ uv run python scripts/sync_engine.py --watch --apply
 uv run python scripts/sync_engine.py --check --input /path/to/test_cases.xlsx
 ```
 
-未提供 `--check` 或 `--apply` 時,預設使用 `--check`。`--check`、`--apply` 與機器可讀的 `--list-changed` 互斥。`--run-changed` 需要 `--apply`;它在成功收集後,執行新增/修改活動場景的精確 pytest node ID。`scripts/run_changed_matrix.sh` 消費 `--list-changed`,對裝置/Appium 做預檢,套用一次,然後在矩陣 `replicate` 模式下執行精確的變更子集,使每個被選裝置都校驗每個變更案例。`--watch` 在沒有 `--apply` 時僅報告 drift。Diff 類別為 `added`、`modified`、`deprecated`、`unchanged` 與 `errors`;沒有隱式的 `deleted` 類別。
+未提供 `--check` 或 `--apply` 時,預設使用 `--check`。`--check`、`--apply` 與機器可讀的 `--list-changed` 互斥。`--run-changed` 需要 `--apply`;它在成功收集後,執行新增/修改活動場景的精確 pytest node ID。`scripts/run_changed_matrix.sh` 消費 `--list-changed`,預覽裝置並套用一次變化,再由矩陣 Runner 負責檢查/啟動 Appium，並在矩陣 `replicate` 模式下執行精確的變更子集,使每個被選裝置都校驗每個變更案例。`--watch` 在沒有 `--apply` 時僅報告 drift。Diff 類別為 `added`、`modified`、`deprecated`、`unchanged` 與 `errors`;沒有隱式的 `deleted` 類別。
 
 退出碼:
 - `0`:合法且無 drift(`--check`),或套用成功且寫入後收集通過。
