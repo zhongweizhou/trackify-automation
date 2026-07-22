@@ -22,6 +22,7 @@
 2. [技術規格](docs/TECHNICAL_SPEC.zh-HK.md)
 3. [架構決策](docs/DESIGN.zh-HK.md)
 4. [專案復盤](docs/REFLECTION.zh-HK.md)
+5. [Runner 流程圖與呼叫鏈](docs/RUNNER_FLOW.md)
 
 | 工程亮點 | 儲存庫中的體現 |
 |---|---|

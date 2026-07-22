@@ -21,7 +21,8 @@ state, cross-platform execution, and attributable reports.
 **Start here**: [sample Android + iOS matrix report](docs/reports/device-matrix-preprod-sample.md)
 | [technical specification](docs/TECHNICAL_SPEC.md) |
 [architecture decisions](docs/DESIGN.md) |
-[honest reflection](docs/REFLECTION.md)
+[honest reflection](docs/REFLECTION.md) |
+[runner flow and call chain](docs/RUNNER_FLOW.md)
 
 | Engineering highlight | Evidence in this repository |
 |---|---|

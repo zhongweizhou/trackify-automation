@@ -22,6 +22,7 @@
 2. [技术规格](docs/TECHNICAL_SPEC.zh-CN.md)
 3. [架构决策](docs/DESIGN.zh-CN.md)
 4. [项目复盘](docs/REFLECTION.zh-CN.md)
+5. [Runner 流程图与调用链](docs/RUNNER_FLOW.md)
 
 | 工程亮点 | 仓库中的体现 |
 |---|---|
