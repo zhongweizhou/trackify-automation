@@ -23,6 +23,10 @@ data/.backup/
 data/device_shards.local.yaml
 outputs/
 
+# Device-free self-check tests (existing tracked files remain tracked)
+/unit_tests/
+/tests/unit/
+
 # IDE/editor
 .idea/
 .vscode/

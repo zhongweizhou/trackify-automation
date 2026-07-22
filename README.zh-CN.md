@@ -22,6 +22,7 @@
 2. [技术规格](docs/TECHNICAL_SPEC.zh-CN.md)
 3. [架构决策](docs/DESIGN.zh-CN.md)
 4. [项目复盘](docs/REFLECTION.zh-CN.md)
+5. [Runner 流程图与调用链](docs/RUNNER_FLOW.md)
 
 | 工程亮点 | 仓库中的体现 |
 |---|---|
@@ -117,7 +118,7 @@ cp -R /path/to/Runner.app app/Runner.app
 
 ### 3. 启动并确认测试设备
 
-先在 Android Studio/Xcode 中启动需要执行的模拟器，再检查设备状态：
+仍然可以手动启动并检查设备：
 
 ```bash
 # Android 目标必须显示为 device，不能是 offline/unauthorized
@@ -126,6 +127,12 @@ adb devices -l
 # iOS 模拟器必须显示为 Booted
 xcrun simctl list devices booted
 ```
+
+正式执行时也可以增加 `--prepare-devices` 自动管理生命周期，不需要预先知道
+设备名称。每个平台会优先复用一个已启动虚拟设备；没有已启动设备时，确定性
+选择并启动一个本机已安装设备。随后从 `app/` 覆盖安装应用、执行 pytest、
+等待 60 秒，再关闭选中的 Android 虚拟机或 iOS 模拟器。真实设备不会被自动
+启动或关闭。
 
 ### 4. 在独立终端启动 Appium
 
@@ -144,6 +151,9 @@ appium
 
 ```bash
 .venv/bin/python scripts/run_device_matrix.py --list
+
+# 列出所有已安装虚拟设备、状态、UDID 和零配置自动选择结果
+.venv/bin/python scripts/run_device_matrix.py --list-available-devices
 
 # 同时预览设备发现结果和具体用例分片，不执行测试
 .venv/bin/python scripts/run_device_matrix.py \
@@ -164,7 +174,30 @@ appium
 .venv/bin/python scripts/run_device_matrix.py \
   --distribution split \
   --env preprod
+
+# 零配置：自动选择一个 Android 和一个 iOS 目标
+.venv/bin/python scripts/run_device_matrix.py \
+  --prepare-devices \
+  --env preprod
+
+# 需要固定兼容性机型时，显式参数覆盖自动选择
+.venv/bin/python scripts/run_device_matrix.py \
+  --prepare-devices \
+  --android-avd Pixel_10 \
+  --ios-simulator "iPhone 17" \
+  --env preprod
+
+# 仅 Android；调试时设置 --shutdown-after 0 保留设备
+.venv/bin/python scripts/run_device_matrix.py \
+  --prepare-devices \
+  --platform android \
+  --shutdown-after 0 \
+  --env preprod
 ```
+
+`--android-avd` 使用 `emulator -list-avds` 返回的 AVD 名称；
+`--ios-simulator` 支持准确的 Simulator 名称或 UDID。设备准备命令作用于执行
+脚本的机器；远程 Appium 主机需要在该主机执行同一脚本，或由 CI 单独预置设备。
 
 默认的 `replicate` 模式用于验证每台设备上的完整兼容性；需要缩短整套测试
 执行时间时，使用 `split` 将互不重叠的用例子集分配给各设备。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import re
@@ -30,10 +31,16 @@ from scripts.sync_engine import SyncError, changed_nodeids, parse_workbook
 DEFAULT_REPORT_ROOT = ROOT / "report" / "device-matrix"
 SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 UNIT_TEST_IGNORE = "--ignore=tests/unit"
+DEVICE_BOOT_TIMEOUT_SECONDS = 120
+DEVICE_POLL_INTERVAL_SECONDS = 2
 
 
 class ShardConfigError(ValueError):
     """Raised when an explicit case-to-device mapping is invalid."""
+
+
+class DevicePreparationError(RuntimeError):
+    """Raised when a requested simulator cannot be prepared for execution."""
 
 
 @dataclass(frozen=True)
@@ -144,6 +151,18 @@ def _adb() -> str:
     return str(candidate) if candidate.exists() else "adb"
 
 
+def _android_emulator() -> str:
+    if executable := shutil.which("emulator"):
+        return executable
+    sdk_root = os.getenv("ANDROID_HOME") or os.getenv("ANDROID_SDK_ROOT")
+    if sdk_root:
+        candidate = Path(sdk_root) / "emulator" / "emulator"
+        if candidate.exists():
+            return str(candidate)
+    candidate = Path.home() / "Library" / "Android" / "sdk" / "emulator" / "emulator"
+    return str(candidate) if candidate.exists() else "emulator"
+
+
 def discover_android_devices() -> list[Device]:
     """Return all adb devices in the ready state."""
     adb = _adb()
@@ -176,10 +195,117 @@ def discover_android_devices() -> list[Device]:
                 name=name or details.get("model", udid),
                 udid=udid,
                 os_version=os_version or "unknown",
-                target_type="emulator",
+                target_type="emulator" if udid.startswith("emulator-") else "real",
             )
         )
     return devices
+
+
+def _running_android_avds() -> dict[str, str]:
+    """Return ready Android AVD names keyed to their emulator serials."""
+    running: dict[str, str] = {}
+    adb = _adb()
+    for device in discover_android_devices():
+        if device.target_type != "emulator":
+            continue
+        try:
+            output = _run([adb, "-s", device.udid, "emu", "avd", "name"])
+        except (OSError, subprocess.SubprocessError):
+            continue
+        name = next(
+            (line.strip() for line in output.splitlines() if line.strip() != "OK"),
+            "",
+        )
+        if name:
+            running[name] = device.udid
+    return running
+
+
+def list_android_avds() -> list[str]:
+    """Return installed local Android AVD names."""
+    try:
+        output = _run([_android_emulator(), "-list-avds"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise DevicePreparationError(f"cannot list Android AVDs: {exc}") from exc
+    return sorted({line.strip() for line in output.splitlines() if line.strip()})
+
+
+def _version_numbers(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", value))
+
+
+def choose_android_avd(
+    available_avds: list[str],
+    running_avds: dict[str, str],
+) -> str:
+    """Choose one deterministic AVD, preferring an already-running target."""
+    available = set(available_avds)
+    running = available.intersection(running_avds)
+    candidates = running or available
+    if not candidates:
+        raise DevicePreparationError(
+            "no Android AVD is installed; create one in Android Studio first"
+        )
+    return max(candidates, key=lambda name: (_version_numbers(name), name.lower()))
+
+
+def _android_boot_completed(udid: str) -> bool:
+    try:
+        return _run(
+            [_adb(), "-s", udid, "shell", "getprop", "sys.boot_completed"],
+            timeout=5,
+        ) == "1"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def ensure_android_avds(
+    avd_names: list[str],
+    *,
+    timeout: int = DEVICE_BOOT_TIMEOUT_SECONDS,
+) -> set[str]:
+    """Start requested local AVDs when needed and wait for Android readiness."""
+    if not avd_names:
+        return set()
+    emulator = _android_emulator()
+    available = set(list_android_avds())
+    unknown = sorted(set(avd_names) - available)
+    if unknown:
+        raise DevicePreparationError(
+            "unknown Android AVD(s): " + ", ".join(unknown)
+        )
+
+    running = _running_android_avds()
+    for avd_name in dict.fromkeys(avd_names):
+        if avd_name in running:
+            continue
+        print(f"[matrix] Starting Android AVD {avd_name!r}...")
+        try:
+            subprocess.Popen(
+                [emulator, "-avd", avd_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise DevicePreparationError(
+                f"cannot start Android AVD {avd_name!r}: {exc}"
+            ) from exc
+
+    deadline = time.monotonic() + timeout
+    desired = set(avd_names)
+    while time.monotonic() < deadline:
+        running = _running_android_avds()
+        if desired.issubset(running) and all(
+            _android_boot_completed(running[name]) for name in desired
+        ):
+            return {running[name] for name in desired}
+        time.sleep(DEVICE_POLL_INTERVAL_SECONDS)
+    waiting_for = sorted(desired - set(running))
+    detail = ", ".join(waiting_for or desired)
+    raise DevicePreparationError(
+        f"Android AVD boot timed out after {timeout}s: {detail}"
+    )
 
 
 def discover_ios_simulators() -> list[Device]:
@@ -190,12 +316,32 @@ def discover_ios_simulators() -> list[Device]:
         print(f"[matrix] iOS discovery skipped: {exc}", file=sys.stderr)
         return []
 
+    return parse_ios_simulator_inventory(payload, booted_only=True)
+
+
+def parse_ios_simulator_inventory(
+    payload: dict[str, object],
+    *,
+    booted_only: bool = False,
+) -> list[Device]:
+    """Convert ``simctl list --json`` output into available simulator targets."""
     devices: list[Device] = []
-    for runtime, runtime_devices in payload.get("devices", {}).items():
-        match = re.search(r"\.iOS-(\d+)-(\d+)(?:-(\d+))?$", runtime)
+    raw_devices = payload.get("devices", {})
+    if not isinstance(raw_devices, dict):
+        return devices
+    for runtime, runtime_devices in raw_devices.items():
+        match = re.search(r"\.iOS-(\d+)-(\d+)(?:-(\d+))?$", str(runtime))
         version = ".".join(part for part in match.groups() if part) if match else "unknown"
+        if not isinstance(runtime_devices, list):
+            continue
         for item in runtime_devices:
-            if item.get("state") != "Booted" or not item.get("isAvailable", True):
+            if not isinstance(item, dict):
+                continue
+            if booted_only and item.get("state") != "Booted":
+                continue
+            if not item.get("isAvailable", True):
+                continue
+            if not item.get("udid"):
                 continue
             devices.append(
                 Device(
@@ -207,6 +353,241 @@ def discover_ios_simulators() -> list[Device]:
                 )
             )
     return devices
+
+
+def select_prepared_devices(
+    devices: list[Device],
+    *,
+    prepared_udids: set[str],
+    explicitly_selected_udids: set[str],
+) -> list[Device]:
+    """Limit discovered devices to prepared targets, then honor ``--device``."""
+    selected = devices
+    if prepared_udids:
+        selected = [device for device in selected if device.udid in prepared_udids]
+    if explicitly_selected_udids:
+        selected = [
+            device for device in selected if device.udid in explicitly_selected_udids
+        ]
+    return selected
+
+
+def choose_ios_simulator(
+    devices: list[Device],
+    states: dict[str, str],
+) -> Device:
+    """Choose one deterministic iOS simulator, preferring a booted iPhone."""
+    if not devices:
+        raise DevicePreparationError(
+            "no iOS Simulator is installed; add one in Xcode first"
+        )
+    iphones = [device for device in devices if device.name.startswith("iPhone")]
+    candidates = iphones or devices
+    booted = [device for device in candidates if states.get(device.udid) == "Booted"]
+    candidates = booted or candidates
+    return max(
+        candidates,
+        key=lambda device: (
+            _version_numbers(device.os_version),
+            -len(device.name),
+            device.name.lower(),
+        ),
+    )
+
+
+def format_available_devices(
+    *,
+    platform: str,
+    android_avds: list[str],
+    running_android_avds: dict[str, str],
+    ios_simulators: list[Device],
+    ios_states: dict[str, str],
+) -> str:
+    """Render local virtual-device inventory and deterministic auto-selection."""
+    lines: list[str] = []
+    android_choice: str | None = None
+    ios_choice: Device | None = None
+    if platform in {"all", "android"}:
+        lines.append("Android:")
+        for name in sorted(
+            android_avds,
+            key=lambda value: (_version_numbers(value), value.lower()),
+            reverse=True,
+        ):
+            udid = running_android_avds.get(name)
+            status = f"running  {udid}" if udid else "stopped"
+            lines.append(f"  {name:<24} {status}")
+        if not android_avds:
+            lines.append("  (no installed AVDs)")
+        else:
+            android_choice = choose_android_avd(
+                android_avds,
+                running_android_avds,
+            )
+    if platform in {"all", "ios"}:
+        if lines:
+            lines.append("")
+        lines.append("iOS:")
+        for device in sorted(
+            ios_simulators,
+            key=lambda item: (
+                _version_numbers(item.os_version),
+                item.name.lower(),
+            ),
+            reverse=True,
+        ):
+            state = ios_states.get(device.udid, "unknown").lower()
+            lines.append(
+                f"  {device.name:<24} {state:<8} iOS {device.os_version} "
+                f"{device.udid}"
+            )
+        if not ios_simulators:
+            lines.append("  (no installed simulators)")
+        else:
+            ios_choice = choose_ios_simulator(ios_simulators, ios_states)
+
+    lines.extend(["", "Automatic selection:"])
+    if platform in {"all", "android"}:
+        lines.append(f"  Android: {android_choice or 'unavailable'}")
+    if platform in {"all", "ios"}:
+        ios_value = (
+            f"{ios_choice.name} ({ios_choice.udid})" if ios_choice else "unavailable"
+        )
+        lines.append(f"  iOS: {ios_value}")
+    return "\n".join(lines)
+
+
+def android_install_command(adb: str, udid: str, app_path: Path) -> list[str]:
+    """Build an idempotent APK replacement command for one Android target."""
+    return [adb, "-s", udid, "install", "-r", "-t", str(app_path)]
+
+
+def ios_install_command(udid: str, app_path: Path) -> list[str]:
+    """Build a simulator app replacement command for one iOS target."""
+    return ["xcrun", "simctl", "install", udid, str(app_path)]
+
+
+def _ios_simulator_inventory() -> tuple[list[Device], dict[str, str]]:
+    try:
+        payload = json.loads(
+            _run(["xcrun", "simctl", "list", "devices", "available", "--json"])
+        )
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        raise DevicePreparationError(f"cannot list iOS simulators: {exc}") from exc
+    devices = parse_ios_simulator_inventory(payload)
+    states: dict[str, str] = {}
+    raw_devices = payload.get("devices", {})
+    if isinstance(raw_devices, dict):
+        for runtime_devices in raw_devices.values():
+            if not isinstance(runtime_devices, list):
+                continue
+            for item in runtime_devices:
+                if isinstance(item, dict) and item.get("udid"):
+                    states[str(item["udid"])] = str(item.get("state", "unknown"))
+    return devices, states
+
+
+def ensure_ios_simulators(
+    selectors: list[str],
+    *,
+    timeout: int = DEVICE_BOOT_TIMEOUT_SECONDS,
+) -> set[str]:
+    """Boot requested local iOS simulators by exact name or UDID."""
+    if not selectors:
+        return set()
+    inventory, states = _ios_simulator_inventory()
+    selected: list[Device] = []
+    for selector in dict.fromkeys(selectors):
+        matches = [
+            device
+            for device in inventory
+            if device.udid == selector or device.name == selector
+        ]
+        if not matches:
+            raise DevicePreparationError(
+                f"unknown iOS Simulator name or UDID: {selector!r}"
+            )
+        if len(matches) > 1 and all(device.udid != selector for device in matches):
+            candidates = ", ".join(device.udid for device in matches)
+            raise DevicePreparationError(
+                f"iOS Simulator name {selector!r} is ambiguous; use one UDID: "
+                f"{candidates}"
+            )
+        selected.append(matches[0])
+
+    for device in selected:
+        if states.get(device.udid) == "Booted":
+            continue
+        print(f"[matrix] Starting iOS Simulator {device.name!r} ({device.udid})...")
+        try:
+            _run(["xcrun", "simctl", "boot", device.udid], timeout=30)
+            _run(
+                ["xcrun", "simctl", "bootstatus", device.udid, "-b"],
+                timeout=timeout,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise DevicePreparationError(
+                f"cannot boot iOS Simulator {device.udid}: {exc}"
+            ) from exc
+    return {device.udid for device in selected}
+
+
+def install_apps_on_devices(
+    devices: list[Device],
+    *,
+    android_app: Path,
+    ios_app: Path,
+) -> None:
+    """Replace the app build on every selected emulator or simulator."""
+    for device in devices:
+        if device.platform == "Android":
+            command = android_install_command(_adb(), device.udid, android_app)
+        elif device.target_type == "simulator":
+            command = ios_install_command(device.udid, ios_app)
+        else:
+            print(
+                f"[matrix] Physical iOS {device.udid}: Appium will install the "
+                "signed --ios-real-app build."
+            )
+            continue
+        print(
+            f"[matrix] Installing {device.platform} app on "
+            f"{device.name} ({device.udid})..."
+        )
+        try:
+            _run(command, timeout=180)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise DevicePreparationError(
+                f"app installation failed on {device.udid}: {exc}"
+            ) from exc
+
+
+def shutdown_devices(devices: list[Device], delay_seconds: int) -> None:
+    """Wait, then stop selected virtual targets without touching real devices."""
+    virtual_devices = [
+        device
+        for device in devices
+        if device.target_type in {"emulator", "simulator"}
+    ]
+    if not virtual_devices or delay_seconds <= 0:
+        return
+    print(
+        f"[matrix] Tests finished; shutting down {len(virtual_devices)} virtual "
+        f"device(s) in {delay_seconds}s."
+    )
+    time.sleep(delay_seconds)
+    for device in virtual_devices:
+        try:
+            if device.platform == "Android":
+                _run([_adb(), "-s", device.udid, "emu", "kill"], timeout=15)
+            else:
+                _run(["xcrun", "simctl", "shutdown", device.udid], timeout=15)
+            print(f"[matrix] Stopped {device.platform} {device.name} ({device.udid}).")
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(
+                f"[matrix] WARNING: failed to stop {device.udid}: {exc}",
+                file=sys.stderr,
+            )
 
 
 def discover_ios_real_devices() -> list[Device]:
@@ -940,6 +1321,40 @@ def build_parser() -> argparse.ArgumentParser:
         default=ROOT / "data" / "test_cases.xlsx",
         help="Excel registry used to resolve stable TC_* IDs in a shard config",
     )
+    parser.add_argument(
+        "--prepare-devices",
+        action="store_true",
+        help="Boot requested virtual devices, replace the app, then run tests",
+    )
+    parser.add_argument(
+        "--android-avd",
+        action="append",
+        default=[],
+        help="Android AVD name to ensure is running; repeat for multiple AVDs",
+    )
+    parser.add_argument(
+        "--ios-simulator",
+        action="append",
+        default=[],
+        help="iOS Simulator name or UDID to boot; repeat for multiple simulators",
+    )
+    parser.add_argument(
+        "--device-boot-timeout",
+        type=int,
+        default=DEVICE_BOOT_TIMEOUT_SECONDS,
+        help="Seconds to wait for each requested virtual target to become ready",
+    )
+    parser.add_argument(
+        "--shutdown-after",
+        type=int,
+        default=60,
+        help="Seconds to wait after the run before stopping virtual targets; 0 keeps them",
+    )
+    parser.add_argument(
+        "--list-available-devices",
+        action="store_true",
+        help="List installed virtual targets and show automatic choices",
+    )
     parser.add_argument("--list", action="store_true", help="List targets without running")
     parser.add_argument("--appium-url", default="http://127.0.0.1:4723")
     parser.add_argument("--android-app", type=Path, default=ROOT / "app" / "app-release.apk")
@@ -969,10 +1384,101 @@ def main() -> int:
         raise ValueError("--distribution mapped requires --shard-config")
     if args.distribution != "mapped" and args.shard_config is not None:
         raise ValueError("--shard-config can only be used with --distribution mapped")
+    if (args.android_avd or args.ios_simulator) and not args.prepare_devices:
+        raise ValueError(
+            "--android-avd and --ios-simulator require --prepare-devices"
+        )
+    if args.platform == "ios" and args.android_avd:
+        raise ValueError("--android-avd cannot be used with --platform ios")
+    if args.platform == "android" and args.ios_simulator:
+        raise ValueError("--ios-simulator cannot be used with --platform android")
+    if args.prepare_devices and args.list:
+        raise ValueError("--prepare-devices cannot be combined with --list")
+    if args.list_available_devices and (args.prepare_devices or args.list):
+        raise ValueError(
+            "--list-available-devices cannot be combined with --prepare-devices or --list"
+        )
+    if args.device_boot_timeout < 1:
+        raise ValueError("--device-boot-timeout must be at least 1")
+    if args.shutdown_after < 0:
+        raise ValueError("--shutdown-after must be zero or greater")
+    if args.android_avd and not args.android_app.exists():
+        raise FileNotFoundError(f"Android app not found: {args.android_app}")
+    if args.ios_simulator and not args.ios_app.exists():
+        raise FileNotFoundError(f"iOS app not found: {args.ios_app}")
+    if args.list_available_devices:
+        android_avds: list[str] = []
+        running_android_avds: dict[str, str] = {}
+        ios_simulators: list[Device] = []
+        ios_states: dict[str, str] = {}
+        if args.platform in {"all", "android"}:
+            android_avds = list_android_avds()
+            running_android_avds = _running_android_avds()
+        if args.platform in {"all", "ios"}:
+            ios_simulators, ios_states = _ios_simulator_inventory()
+        print(
+            format_available_devices(
+                platform=args.platform,
+                android_avds=android_avds,
+                running_android_avds=running_android_avds,
+                ios_simulators=ios_simulators,
+                ios_states=ios_states,
+            )
+        )
+        return 0
     change_manifest = load_change_manifest(args.change_manifest)
-    devices = discover_devices(args.platform, set(args.device))
+    prepared_udids: set[str] = set()
+    appium_checked = False
+    if args.prepare_devices:
+        check_appium(args.appium_url)
+        appium_checked = True
+        if args.platform in {"all", "android"}:
+            android_avds = list(args.android_avd)
+            if not android_avds:
+                android_avds = [
+                    choose_android_avd(
+                        list_android_avds(),
+                        _running_android_avds(),
+                    )
+                ]
+                print(f"[matrix] Auto-selected Android AVD {android_avds[0]!r}.")
+            prepared_udids.update(
+                ensure_android_avds(
+                    android_avds,
+                    timeout=args.device_boot_timeout,
+                )
+            )
+        if args.platform in {"all", "ios"}:
+            ios_selectors = list(args.ios_simulator)
+            if not ios_selectors:
+                ios_inventory, ios_states = _ios_simulator_inventory()
+                selected_ios = choose_ios_simulator(ios_inventory, ios_states)
+                ios_selectors = [selected_ios.udid]
+                print(
+                    f"[matrix] Auto-selected iOS Simulator "
+                    f"{selected_ios.name!r} ({selected_ios.udid})."
+                )
+            prepared_udids.update(
+                ensure_ios_simulators(
+                    ios_selectors,
+                    timeout=args.device_boot_timeout,
+                )
+            )
+    devices = select_prepared_devices(
+        discover_devices(args.platform, set()),
+        prepared_udids=prepared_udids,
+        explicitly_selected_udids=set(args.device),
+    )
     if not devices:
-        print("[matrix] No matching ready devices were discovered.", file=sys.stderr)
+        detail = (
+            " No --android-avd or --ios-simulator target was provided."
+            if args.prepare_devices and not prepared_udids
+            else ""
+        )
+        print(
+            f"[matrix] No matching ready devices were discovered.{detail}",
+            file=sys.stderr,
+        )
         return 2
 
     print(f"[matrix] Discovered {len(devices)} device(s):")
@@ -1049,7 +1555,6 @@ def main() -> int:
     if args.list:
         return 0
 
-    check_appium(args.appium_url)
     if (
         any(device.platform == "Android" for device in active_devices)
         and not args.android_app.exists()
@@ -1066,6 +1571,17 @@ def main() -> int:
         )
     if args.ios_real_app is not None and not args.ios_real_app.exists():
         raise FileNotFoundError(f"Physical iOS app not found: {args.ios_real_app}")
+
+    if args.prepare_devices:
+        atexit.register(shutdown_devices, devices, args.shutdown_after)
+        install_apps_on_devices(
+            active_devices,
+            android_app=args.android_app.resolve(),
+            ios_app=args.ios_app.resolve(),
+        )
+
+    if not appium_checked:
+        check_appium(args.appium_url)
 
     started_at = datetime.now().astimezone()
     timestamp = started_at.strftime("%Y%m%d-%H%M%S")
