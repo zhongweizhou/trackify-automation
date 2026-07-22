@@ -134,15 +134,21 @@ xcrun simctl list devices booted
 等待 60 秒，再关闭选中的 Android 虚拟机或 iOS 模拟器。真实设备不会被自动
 启动或关闭。
 
-### 4. 在独立终端启动 Appium
+### 4. Appium 生命周期
 
-Android SDK 环境变量必须在启动 Appium 的同一个终端中设置。启动后保持该
-进程运行：
+启动设备或执行 pytest 前，Runner 会先检查 Appium `/status`。如果本机已有
+ready 的 Appium，会直接复用；如果本机服务未启动，矩阵执行会自动启动，并将
+日志写入 `report/appium/appium.log`，直到返回 `ready: true`。如需强制要求手动
+启动，可传入 `--no-auto-start-appium`。命令开始前已经存在的 Appium 不会被关闭；由 Runner
+自动启动的 Appium 会在测试结束等待 `--shutdown-after`（默认 60 秒）后关闭。
+
+远程 Appium 服务器需要在远程主机手动启动。本机手动启动时，请在同一个终端
+设置 Android SDK 环境变量：
 
 ```bash
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-appium
+appium --address 127.0.0.1 --port 4723
 ```
 
 ### 5. 预检本次执行设备
@@ -234,7 +240,8 @@ Allure 报告，以及失败阶段截图。可以与仓库内提交的
 | 现象 | 排查方式 |
 |---|---|
 | 没有发现设备 | 执行 `adb devices -l` 和 `xcrun simctl list devices booted`，启动或重连目标 |
-| Appium connection refused | 确认独立终端中的 `appium` 仍在运行，并监听 `4723` |
+| Appium connection refused | 矩阵命令可以自动启动本机服务；直接执行 pytest 时请在 `4723` 启动 Appium，或传入 `--appium-url` |
+| Appium `/status` 返回 502 | 使用 `curl --noproxy '*' http://127.0.0.1:4723/status` 验证本机端点，并检查 `report/appium/appium.log` |
 | 找不到 Android SDK | 启动 Appium 前设置 `ANDROID_HOME`、`ANDROID_SDK_ROOT`，然后重启 Appium |
 | 找不到应用包 | 从仓库根目录确认 `app/app-release.apk` 和/或 `app/Runner.app` 存在 |
 | 缺少 XCUITest | 执行 `appium driver install xcuitest` |
@@ -695,13 +702,19 @@ uv run python scripts/sync_engine.py --watch --apply
 ```
 
 `run_changed_matrix.sh` 是推荐的跨设备变化健康门禁。它读取机器可解析的变化
-清单，在写入前发现设备并检查 Appium，原子应用通过校验的 Feature 变化，然后
-固定使用矩阵 `replicate` 模式：每条新增/修改的 active 用例都会在每台选中
-设备执行，而不是被拆分到不同设备。
+清单，预览设备，原子应用通过校验的 Feature 变化，然后固定使用矩阵
+`replicate` 模式。委托的矩阵 Runner 会自动检查或启动本机 Appium，因此不需要
+提前手动启动本机服务。
 
 ```bash
 # 默认：preprod，所有已发现的 Android + iOS 设备
 ./scripts/run_changed_matrix.sh
+
+# 启动/复用指定 Android 和 iOS 模拟器，安装 App，执行后等待 60 秒清理
+./scripts/run_changed_matrix.sh \
+  --prepare-devices \
+  --android-avd Pixel_10 \
+  --ios-simulator "iPhone 17"
 
 # 只在全部 Android 设备执行
 ./scripts/run_changed_matrix.sh --platform android

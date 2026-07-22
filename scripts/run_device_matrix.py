@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
@@ -33,6 +34,8 @@ SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 UNIT_TEST_IGNORE = "--ignore=tests/unit"
 DEVICE_BOOT_TIMEOUT_SECONDS = 120
 DEVICE_POLL_INTERVAL_SECONDS = 2
+APPIUM_STARTUP_TIMEOUT_SECONDS = 30
+APPIUM_POLL_INTERVAL_SECONDS = 1
 
 
 class ShardConfigError(ValueError):
@@ -126,6 +129,44 @@ class RunningDevice:
     screenshot_dir: Path
     junit_path: Path
     assigned_nodeids: tuple[str, ...] | None
+
+
+@dataclass(frozen=True)
+class ManagedAppium:
+    """An Appium server process started and owned by this matrix invocation."""
+
+    process: subprocess.Popen[str]
+    log_path: Path
+
+
+@dataclass
+class LifecycleState:
+    """Resources owned by one matrix process and finalized at interpreter exit."""
+
+    shutdown_after: int
+    devices: list[Device]
+    manage_devices: bool = False
+    managed_appium: ManagedAppium | None = None
+    tests_started: bool = False
+    finalized: bool = False
+
+
+def finalize_lifecycle(state: LifecycleState) -> None:
+    """Release owned resources once, waiting only after test execution."""
+    if state.finalized:
+        return
+    state.finalized = True
+    if state.tests_started:
+        shutdown_managed_lifecycle(
+            state.devices if state.manage_devices else [],
+            state.managed_appium,
+            state.shutdown_after,
+        )
+        return
+    if state.manage_devices:
+        stop_virtual_devices(state.devices)
+    if state.managed_appium is not None:
+        stop_managed_appium(state.managed_appium)
 
 
 def _run(command: list[str], timeout: int = 15) -> str:
@@ -562,6 +603,24 @@ def install_apps_on_devices(
             ) from exc
 
 
+def stop_virtual_devices(devices: list[Device]) -> None:
+    """Stop selected virtual targets immediately without touching real devices."""
+    for device in devices:
+        if device.target_type not in {"emulator", "simulator"}:
+            continue
+        try:
+            if device.platform == "Android":
+                _run([_adb(), "-s", device.udid, "emu", "kill"], timeout=15)
+            else:
+                _run(["xcrun", "simctl", "shutdown", device.udid], timeout=15)
+            print(f"[matrix] Stopped {device.platform} {device.name} ({device.udid}).")
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(
+                f"[matrix] WARNING: failed to stop {device.udid}: {exc}",
+                file=sys.stderr,
+            )
+
+
 def shutdown_devices(devices: list[Device], delay_seconds: int) -> None:
     """Wait, then stop selected virtual targets without touching real devices."""
     virtual_devices = [
@@ -576,18 +635,7 @@ def shutdown_devices(devices: list[Device], delay_seconds: int) -> None:
         f"device(s) in {delay_seconds}s."
     )
     time.sleep(delay_seconds)
-    for device in virtual_devices:
-        try:
-            if device.platform == "Android":
-                _run([_adb(), "-s", device.udid, "emu", "kill"], timeout=15)
-            else:
-                _run(["xcrun", "simctl", "shutdown", device.udid], timeout=15)
-            print(f"[matrix] Stopped {device.platform} {device.name} ({device.udid}).")
-        except (OSError, subprocess.SubprocessError) as exc:
-            print(
-                f"[matrix] WARNING: failed to stop {device.udid}: {exc}",
-                file=sys.stderr,
-            )
+    stop_virtual_devices(virtual_devices)
 
 
 def discover_ios_real_devices() -> list[Device]:
@@ -868,15 +916,164 @@ def build_assignments(
     return assignments
 
 
+def _is_loopback_url(server_url: str) -> bool:
+    host = urllib.parse.urlsplit(server_url).hostname
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
 def check_appium(server_url: str) -> None:
     status_url = f"{server_url.rstrip('/')}/status"
     try:
-        with urllib.request.urlopen(status_url, timeout=3) as response:
+        if _is_loopback_url(server_url):
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            response_context = opener.open(status_url, timeout=3)
+        else:
+            response_context = urllib.request.urlopen(status_url, timeout=3)
+        with response_context as response:
             payload = json.load(response)
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Appium is not reachable at {status_url}: {exc}") from exc
     if not payload.get("value", {}).get("ready"):
         raise RuntimeError(f"Appium is not ready at {status_url}: {payload!r}")
+
+
+def appium_start_command(executable: str, server_url: str) -> list[str]:
+    """Build a local Appium server command matching the configured URL."""
+    parsed = urllib.parse.urlsplit(server_url)
+    if parsed.scheme != "http" or not _is_loopback_url(server_url):
+        raise RuntimeError(
+            "Appium can only be auto-started for a local http URL; "
+            f"start the remote server manually: {server_url}"
+        )
+    if parsed.query or parsed.fragment:
+        raise RuntimeError(f"Appium URL cannot contain a query or fragment: {server_url}")
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 4723
+    command = [executable, "--address", host, "--port", str(port)]
+    base_path = parsed.path.rstrip("/")
+    if base_path:
+        command.extend(["--base-path", base_path])
+    return command
+
+
+def _appium_log_tail(path: Path, limit: int = 20) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-limit:])
+
+
+def ensure_appium(
+    server_url: str,
+    *,
+    timeout: int = APPIUM_STARTUP_TIMEOUT_SECONDS,
+    log_path: Path | None = None,
+) -> ManagedAppium | None:
+    """Reuse a ready Appium server or start and own a missing local server."""
+    try:
+        check_appium(server_url)
+    except RuntimeError as initial_error:
+        appium = os.getenv("APPIUM_BIN") or shutil.which("appium")
+        if not appium:
+            raise RuntimeError(
+                f"{initial_error}. Appium CLI was not found; install it with "
+                "'npm install -g appium'."
+            ) from initial_error
+        command = appium_start_command(appium, server_url)
+        resolved_log = log_path or ROOT / "report" / "appium" / "appium.log"
+        resolved_log.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[matrix] Appium is not ready; starting: {' '.join(command)}")
+        try:
+            with resolved_log.open("a", encoding="utf-8") as log_handle:
+                process = subprocess.Popen(
+                    command,
+                    cwd=ROOT,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                )
+        except OSError as exc:
+            raise RuntimeError(f"Cannot start Appium: {exc}") from exc
+
+        deadline = time.monotonic() + timeout
+        last_error: RuntimeError = initial_error
+        while time.monotonic() < deadline:
+            exit_code = process.poll()
+            if exit_code is not None:
+                tail = _appium_log_tail(resolved_log)
+                detail = f"\n{tail}" if tail else ""
+                raise RuntimeError(
+                    f"Appium exited with code {exit_code}; log: {resolved_log}{detail}"
+                )
+            try:
+                check_appium(server_url)
+            except RuntimeError as exc:
+                last_error = exc
+                time.sleep(APPIUM_POLL_INTERVAL_SECONDS)
+                continue
+            print(
+                f"[matrix] Appium is ready at {server_url} "
+                f"(PID {process.pid}, log {resolved_log})."
+            )
+            return ManagedAppium(process=process, log_path=resolved_log)
+
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        raise RuntimeError(
+            f"Appium did not become ready within {timeout}s: {last_error}; "
+            f"log: {resolved_log}"
+        ) from last_error
+
+    print(f"[matrix] Reusing ready Appium server at {server_url}.")
+    return None
+
+
+def stop_managed_appium(managed: ManagedAppium) -> None:
+    """Stop only an Appium process started by this matrix invocation."""
+    process = managed.process
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+    print(f"[matrix] Stopped managed Appium PID {process.pid}.")
+
+
+def shutdown_managed_lifecycle(
+    devices: list[Device],
+    managed_appium: ManagedAppium | None,
+    delay_seconds: int,
+) -> None:
+    """Wait once, then stop owned virtual devices and the owned Appium process."""
+    virtual_devices = [
+        device
+        for device in devices
+        if device.target_type in {"emulator", "simulator"}
+    ]
+    if delay_seconds <= 0 or (not virtual_devices and managed_appium is None):
+        return
+    targets = []
+    if virtual_devices:
+        targets.append(f"{len(virtual_devices)} virtual device(s)")
+    if managed_appium is not None:
+        targets.append(f"Appium PID {managed_appium.process.pid}")
+    print(
+        f"[matrix] Tests finished; shutting down {' and '.join(targets)} "
+        f"in {delay_seconds}s."
+    )
+    time.sleep(delay_seconds)
+    stop_virtual_devices(virtual_devices)
+    if managed_appium is not None:
+        stop_managed_appium(managed_appium)
 
 
 def build_environment(
@@ -1357,6 +1554,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--list", action="store_true", help="List targets without running")
     parser.add_argument("--appium-url", default="http://127.0.0.1:4723")
+    parser.add_argument(
+        "--auto-start-appium",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Start a missing local Appium server before execution and stop an "
+            "owned server after --shutdown-after seconds"
+        ),
+    )
     parser.add_argument("--android-app", type=Path, default=ROOT / "app" / "app-release.apk")
     parser.add_argument("--ios-app", type=Path, default=ROOT / "app" / "Runner.app")
     parser.add_argument(
@@ -1380,6 +1586,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    lifecycle = LifecycleState(
+        shutdown_after=args.shutdown_after,
+        devices=[],
+        manage_devices=args.prepare_devices,
+    )
+    atexit.register(finalize_lifecycle, lifecycle)
     if args.distribution == "mapped" and args.shard_config is None:
         raise ValueError("--distribution mapped requires --shard-config")
     if args.distribution != "mapped" and args.shard_config is not None:
@@ -1426,12 +1638,15 @@ def main() -> int:
             )
         )
         return 0
+    if not args.list:
+        if args.prepare_devices or args.auto_start_appium:
+            lifecycle.managed_appium = ensure_appium(args.appium_url)
+        else:
+            check_appium(args.appium_url)
+
     change_manifest = load_change_manifest(args.change_manifest)
     prepared_udids: set[str] = set()
-    appium_checked = False
     if args.prepare_devices:
-        check_appium(args.appium_url)
-        appium_checked = True
         if args.platform in {"all", "android"}:
             android_avds = list(args.android_avd)
             if not android_avds:
@@ -1480,6 +1695,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    lifecycle.devices = devices
 
     print(f"[matrix] Discovered {len(devices)} device(s):")
     for device in devices:
@@ -1573,21 +1789,18 @@ def main() -> int:
         raise FileNotFoundError(f"Physical iOS app not found: {args.ios_real_app}")
 
     if args.prepare_devices:
-        atexit.register(shutdown_devices, devices, args.shutdown_after)
         install_apps_on_devices(
             active_devices,
             android_app=args.android_app.resolve(),
             ios_app=args.ios_app.resolve(),
         )
 
-    if not appium_checked:
-        check_appium(args.appium_url)
-
     started_at = datetime.now().astimezone()
     timestamp = started_at.strftime("%Y%m%d-%H%M%S")
     run_root = args.report_root.resolve() / args.environment / timestamp
     run_root.mkdir(parents=True, exist_ok=True)
 
+    lifecycle.tests_started = True
     running = [
         start_device(assignment, args, index, run_root)
         for index, assignment in enumerate(assignments)

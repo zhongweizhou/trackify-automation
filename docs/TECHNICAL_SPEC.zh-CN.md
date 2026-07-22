@@ -889,11 +889,11 @@ Feature: Transactions List
 npm install -g appium                              # CLI
 appium driver install uiautomator2                 # Android driver
 
-# 2. 启动 Appium server(后台)
-appium &                                           # 监听 :4723
+# 2. 可选：手动启动 Appium（矩阵 Runner 可以自动启动）
+appium --address 127.0.0.1 --port 4723           # 监听 :4723
 
-# 3. 验证 server 在线
-curl http://localhost:4723/status | jq .           # 期望 {"value":{"ready":true}}
+# 3. 手动启动时验证 server 在线
+curl --noproxy '*' http://localhost:4723/status | jq . # 期望 ready=true
 
 # 4. 验证模拟器 + app 包
 adb devices                                        # 列出已连接设备
@@ -901,7 +901,8 @@ adb install -r -t app/app-release.apk              # 安装 Trackify
 adb shell pm list packages | grep com.blixcode.trackify # 确认包存在
 ```
 
-**任何一步失败都在 Task 1 之前修复。** 第 0 天的失败(server 没运行、包缺失)是后期“pytest 永远卡住”现象的头号原因 —— 不是真实 bug。
+**直接执行 pytest 前修复相关失败。** 矩阵 Runner 会自动检查或启动本机
+Appium；应用包和驱动安装失败仍必须在执行前修复。
 
 | # | 任务 | 涉及文件 | 验收标准 | 提交信息 |
 |---|------|---------------|---------------------|----------------|
@@ -1213,7 +1214,7 @@ uv run python scripts/sync_engine.py --watch --apply
 uv run python scripts/sync_engine.py --check --input /path/to/test_cases.xlsx
 ```
 
-未提供 `--check` 或 `--apply` 时,默认使用 `--check`。`--check`、`--apply` 与机器可读的 `--list-changed` 互斥。`--run-changed` 需要 `--apply`;它在成功收集后,运行新增/修改活动场景的精确 pytest node ID。`scripts/run_changed_matrix.sh` 消费 `--list-changed`,对设备/Appium 做预检,应用一次,然后在矩阵 `replicate` 模式下运行精确的变更子集,使每个被选设备都校验每个变更用例。`--watch` 在没有 `--apply` 时仅报告 drift。Diff 类别为 `added`、`modified`、`deprecated`、`unchanged` 和 `errors`;没有隐式的 `deleted` 类别。
+未提供 `--check` 或 `--apply` 时,默认使用 `--check`。`--check`、`--apply` 与机器可读的 `--list-changed` 互斥。`--run-changed` 需要 `--apply`;它在成功收集后,运行新增/修改活动场景的精确 pytest node ID。`scripts/run_changed_matrix.sh` 消费 `--list-changed`,预览设备并应用一次变化,再由矩阵 Runner 负责检查/启动 Appium，并在矩阵 `replicate` 模式下运行精确的变更子集,使每个被选设备都校验每个变更用例。`--watch` 在没有 `--apply` 时仅报告 drift。Diff 类别为 `added`、`modified`、`deprecated`、`unchanged` 和 `errors`;没有隐式的 `deleted` 类别。
 
 退出码:
 - `0`:合法且无 drift(`--check`),或应用成功且写入后收集通过。

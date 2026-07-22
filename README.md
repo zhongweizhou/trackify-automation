@@ -141,15 +141,24 @@ then replaces the app from `app/`, runs pytest, waits 60 seconds, and shuts down
 the selected Android emulator or iOS Simulator. Real devices are never started
 or stopped automatically.
 
-### 4. Start Appium in a dedicated terminal
+### 4. Appium lifecycle
 
-The Android SDK variables must be set in the same terminal that starts Appium.
-Leave this process running.
+Before device preparation or pytest execution, the runner checks Appium's
+`/status` endpoint. A ready local server is reused. If it is missing,
+matrix execution starts it automatically, writes output to
+`report/appium/appium.log`, and waits until `ready: true`. Use
+`--no-auto-start-appium` to require a manually started local server. A server
+that was already running before the command is never stopped. A server started
+by the runner is stopped after the test run's `--shutdown-after` delay (60
+seconds by default).
+
+Remote Appium servers must be started on their host manually. For a local
+manual start, set Android SDK variables in that same terminal:
 
 ```bash
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-appium
+appium --address 127.0.0.1 --port 4723
 ```
 
 ### 5. Preview what will run
@@ -245,7 +254,8 @@ call-stage failures. Compare the output with the committed
 | Symptom | Check |
 |---|---|
 | No devices discovered | Run `adb devices -l` and `xcrun simctl list devices booted`; boot or reconnect the target |
-| Appium connection refused | Confirm the dedicated `appium` terminal is still running on port `4723` |
+| Appium connection refused | Matrix commands can auto-start a local server; for direct pytest, start Appium on `4723` or pass `--appium-url` |
+| Appium `/status` returns 502 | Verify the local endpoint without a proxy: `curl --noproxy '*' http://127.0.0.1:4723/status`; inspect `report/appium/appium.log` |
 | Android SDK not found | Export `ANDROID_HOME` and `ANDROID_SDK_ROOT` before starting Appium, then restart Appium |
 | Android/iOS app not found | Confirm `app/app-release.apk` and/or `app/Runner.app` exists from the repository root |
 | XCUITest driver missing | Run `appium driver install xcuitest` |
@@ -382,7 +392,7 @@ test suite. Detailed examples follow it.
 | Split across devices | `.venv/bin/python scripts/run_device_matrix.py --distribution split --env preprod` | Split the selected suite across devices so each scenario runs exactly once |
 | Explicit mapped shards | `.venv/bin/python scripts/run_device_matrix.py --distribution mapped --shard-config data/device_shards.local.yaml --env preprod` | Run exactly the cases assigned to each configured device and merge one report |
 | List available devices | `.venv/bin/python scripts/run_device_matrix.py --list-available-devices` | Show installed targets, current state, UDID, and zero-config automatic choices |
-| Managed device lifecycle | `.venv/bin/python scripts/run_device_matrix.py --prepare-devices --env preprod` | Automatically choose/boot one target per platform, replace apps, run, wait 60s, then stop them |
+| Managed device lifecycle | `.venv/bin/python scripts/run_device_matrix.py --prepare-devices --env preprod` | Automatically start/reuse Appium, choose/boot one target per platform, replace apps, run, wait 60s, then stop owned resources |
 | Android matrix | `.venv/bin/python scripts/run_device_matrix.py --platform android --env preprod` | Run all connected Android targets concurrently |
 | iOS matrix | `.venv/bin/python scripts/run_device_matrix.py --platform ios --env preprod` | Run all booted iOS simulators and paired iOS devices concurrently |
 | Selected devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod --device <udid-1> --device <udid-2>` | Run only the listed devices; repeat `--device` as needed |
@@ -391,7 +401,8 @@ test suite. Detailed examples follow it.
 | Failure/debug | `uv run pytest -m "not unit" -x -s -vv` | Stop on the first failure and show uncaptured diagnostic output |
 
 Use `.venv/bin/python -m pytest` instead of `uv run pytest` in any row when
-`uv` is unavailable. Start Appium before any command that executes UI tests.
+`uv` is unavailable. Direct single-device `pytest` commands still require a
+manually running Appium server; matrix runners can manage a local server.
 
 #### Full suite
 
@@ -926,14 +937,21 @@ uv run python scripts/sync_engine.py --watch --apply
 ```
 
 `run_changed_matrix.sh` is the recommended cross-device health gate. It reads a
-machine-readable change manifest, discovers devices and checks Appium before
-mutation, applies the validated Feature transaction, then uses matrix
-`replicate` mode so every added/modified active case runs on every selected
-device. Examples:
+machine-readable change manifest, previews devices, applies the validated
+Feature transaction, then uses matrix `replicate` mode. The delegated matrix
+run automatically checks or starts a local Appium server, so a manually
+running local server is optional. Examples:
 
 ```bash
 # Default: preprod, every discovered Android + iOS device
 ./scripts/run_changed_matrix.sh
+
+# Boot/reuse one explicit Android and iOS simulator, install apps, then wait
+# 60 seconds and stop resources started by this command
+./scripts/run_changed_matrix.sh \
+  --prepare-devices \
+  --android-avd Pixel_10 \
+  --ios-simulator "iPhone 17"
 
 # Every ready Android target only
 ./scripts/run_changed_matrix.sh --platform android

@@ -21,6 +21,9 @@ allure-results/
 allure-report/
 data/.backup/
 data/device_shards.local.yaml
+data/device_shards.example.yaml
+docs/RUNNER_FLOW.md
+uv.lock
 outputs/
 
 # Device-free self-check tests (existing tracked files remain tracked)
