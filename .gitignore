@@ -17,6 +17,7 @@ report/allure-results/
 report/screenshots/
 report/device-matrix/
 report/changed-device-matrix/
+report/appium/
 allure-results/
 allure-report/
 data/.backup/

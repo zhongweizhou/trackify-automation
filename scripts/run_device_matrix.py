@@ -204,6 +204,11 @@ def _android_emulator() -> str:
     return str(candidate) if candidate.exists() else "emulator"
 
 
+def android_emulator_start_command(executable: str, avd_name: str) -> list[str]:
+    """Build a non-interactive local Android Emulator launch command."""
+    return [executable, "-avd", avd_name, "-skip-adb-auth"]
+
+
 def discover_android_devices() -> list[Device]:
     """Return all adb devices in the ready state."""
     adb = _adb()
@@ -323,7 +328,7 @@ def ensure_android_avds(
         print(f"[matrix] Starting Android AVD {avd_name!r}...")
         try:
             subprocess.Popen(
-                [emulator, "-avd", avd_name],
+                android_emulator_start_command(emulator, avd_name),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,

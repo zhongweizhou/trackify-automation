@@ -132,7 +132,9 @@ xcrun simctl list devices booted
 裝置名稱。每個平台會優先重用一個已啟動虛擬裝置；沒有已啟動裝置時，確定性
 選擇並啟動一個本機已安裝裝置。隨後從 `app/` 覆蓋安裝應用、執行 pytest、
 等待 60 秒，再關閉選中的 Android 虛擬機或 iOS 模擬器。真實裝置不會被自動
-啟動或關閉。
+啟動或關閉。Runner 啟動 Android AVD 時會傳入 `-skip-adb-auth`，避免被 USB
+偵錯授權彈窗阻塞；從 Android Studio 手動啟動的模擬器和實體裝置仍可能需要
+一次性勾選「一律允許使用這部電腦」並點擊允許。
 
 ### 4. Appium 生命週期
 
