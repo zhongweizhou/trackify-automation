@@ -139,7 +139,10 @@ device name is required: each requested platform reuses one running virtual
 target or deterministically selects and boots an installed target. The runner
 then replaces the app from `app/`, runs pytest, waits 60 seconds, and shuts down
 the selected Android emulator or iOS Simulator. Real devices are never started
-or stopped automatically.
+or stopped automatically. Android AVDs started by the runner use
+`-skip-adb-auth`, so the emulator does not block on the USB-debugging approval
+dialog. Manually started emulators and physical devices may still require a
+one-time **Always allow from this computer** confirmation.
 
 ### 4. Appium lifecycle
 
