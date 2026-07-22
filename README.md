@@ -393,7 +393,6 @@ test suite. Detailed examples follow it.
 | Scenario | `uv run pytest -k "add_expense_happy_path" -q` | Run one generated pytest scenario name |
 | Replicate across devices | `.venv/bin/python scripts/run_device_matrix.py --env preprod` | Run all 7 scenarios on every discovered Android and iOS target |
 | Split across devices | `.venv/bin/python scripts/run_device_matrix.py --distribution split --env preprod` | Split the selected suite across devices so each scenario runs exactly once |
-| Explicit mapped shards | `.venv/bin/python scripts/run_device_matrix.py --distribution mapped --shard-config data/device_shards.local.yaml --env preprod` | Run exactly the cases assigned to each configured device and merge one report |
 | List available devices | `.venv/bin/python scripts/run_device_matrix.py --list-available-devices` | Show installed targets, current state, UDID, and zero-config automatic choices |
 | Managed device lifecycle | `.venv/bin/python scripts/run_device_matrix.py --prepare-devices --env preprod` | Automatically start/reuse Appium, choose/boot one target per platform, replace apps, run, wait 60s, then stop owned resources |
 | Android matrix | `.venv/bin/python scripts/run_device_matrix.py --platform android --env preprod` | Run all connected Android targets concurrently |
@@ -577,30 +576,7 @@ environment defaults to `preprod`.
   -- \
   -m smoke
 
-# Prepare an explicit case-to-device mapping (edit the UDIDs after copying)
-cp data/device_shards.example.yaml data/device_shards.local.yaml
-
-# Preview the exact configured mapping without starting Appium sessions
-.venv/bin/python scripts/run_device_matrix.py \
-  --platform android \
-  --distribution mapped \
-  --env preprod \
-  --shard-config data/device_shards.local.yaml \
-  --list
-
-# Run the configured mapping and produce one merged Allure report
-.venv/bin/python scripts/run_device_matrix.py \
-  --platform android \
-  --distribution mapped \
-  --env preprod \
-  --shard-config data/device_shards.local.yaml
 ```
-
-`data/device_shards.example.yaml` accepts stable case IDs such as
-`TC_ADD_TX_001` or complete pytest node IDs. `mapped` requires every selected
-pytest case to be assigned exactly once, and every configured device to be
-currently discoverable. The generated `summary.md` and `summary.json` retain
-the exact case-to-device assignment.
 
 ```bash
 # Run one device by UDID
