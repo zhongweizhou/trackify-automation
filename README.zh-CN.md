@@ -487,28 +487,7 @@ transactions_grouped_by_date_with_section_headers
   -- \
   -m smoke
 
-# 复制显式 case-to-device 配置，并将 device 改成实际 UDID
-cp data/device_shards.example.yaml data/device_shards.local.yaml
-
-# 预览显式分片，不启动 Appium 会话
-.venv/bin/python scripts/run_device_matrix.py \
-  --platform android \
-  --distribution mapped \
-  --env preprod \
-  --shard-config data/device_shards.local.yaml \
-  --list
-
-# 执行显式分片，并生成一份合并的 Allure 报告
-.venv/bin/python scripts/run_device_matrix.py \
-  --platform android \
-  --distribution mapped \
-  --env preprod \
-  --shard-config data/device_shards.local.yaml
 ```
-
-`data/device_shards.example.yaml` 中的 `cases` 可以写稳定用例 ID（例如
-`TC_ADD_TX_001`），也可以写完整 pytest node ID。`mapped` 模式要求当前
-pytest 选中的每条用例恰好配置一次，并且配置中的设备必须已被发现。
 
 ### 7. Allure 报告
 
