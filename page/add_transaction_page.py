@@ -7,6 +7,7 @@ from calendar import month_name
 from datetime import datetime
 
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.webdriver.remote.webelement import WebElement
 
 from page.base_page import BasePage
 from utils.locator_loader import Locator, load_locator
@@ -319,36 +320,54 @@ class AddTransactionPage(BasePage):
 
     def _scroll_category_into_view(self, locator: Locator) -> None:
         for _ in range(4):
+            target = None
             if self.is_visible(locator, timeout=1):
-                return
-
-            if self._platform == "ios":
-                window = self._driver.get_window_size()
-                self.swipe(
-                    window["width"] * 9 // 10,
-                    window["height"] * 36 // 100,
-                    window["width"] // 10,
-                    window["height"] * 36 // 100,
-                    duration_ms=600,
-                )
-                continue
+                target = self.wait_for(locator, timeout=1)
 
             category_scroll = self.wait_for(self._loc("category_scroll"))
-            start_x = (
-                category_scroll.location["x"]
-                + category_scroll.size["width"] * 9 // 10
-            )
-            end_x = (
-                category_scroll.location["x"]
-                + category_scroll.size["width"] // 10
-            )
+            if target is not None and self._category_target_in_safe_region(
+                target,
+                category_scroll,
+            ):
+                return
+
+            left = category_scroll.location["x"]
+            width = category_scroll.size["width"]
             center_y = (
                 category_scroll.location["y"]
                 + category_scroll.size["height"] // 2
             )
+            target_center_x = (
+                target.location["x"] + target.size["width"] // 2
+                if target is not None
+                else None
+            )
+            safe_left = left + max(20, width // 10)
+            if target_center_x is not None and target_center_x < safe_left:
+                start_x = left + width // 4
+                end_x = left + width * 3 // 4
+            else:
+                start_x = left + width * 9 // 10
+                end_x = left + width // 10
             self.swipe(start_x, center_y, end_x, center_y, duration_ms=600)
 
-        self.wait_for(locator, timeout=2)
+        target = self.wait_for(locator, timeout=2)
+        category_scroll = self.wait_for(self._loc("category_scroll"))
+        if not self._category_target_in_safe_region(target, category_scroll):
+            raise TimeoutException(
+                f"Category target {locator!r} remained clipped after scrolling."
+            )
+
+    def _category_target_in_safe_region(
+        self,
+        target: WebElement,
+        viewport: WebElement,
+    ) -> bool:
+        left = viewport.location["x"]
+        right = left + viewport.size["width"]
+        inset = max(20, viewport.size["width"] // 10)
+        center_x = target.location["x"] + target.size["width"] // 2
+        return left + inset <= center_x <= right - inset
 
     def _select_custom_category(self, name: str) -> None:
         category_locator = self._loc("category_option", category=name)

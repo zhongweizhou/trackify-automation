@@ -76,12 +76,13 @@ def _block_hashes(root: Path, module: str) -> dict[str, str]:
     }
 
 
-def test_corrected_registry_contains_seven_routed_automated_rows() -> None:
+def test_corrected_registry_contains_eight_routed_rows() -> None:
     rows = parse_workbook(REGISTRY)
 
-    assert len(rows) == 7
-    assert all(row.status == "automated" for row in rows)
-    assert sum(row.module == "add_transaction" for row in rows) == 5
+    assert len(rows) == 8
+    assert sum(row.status == "automated" for row in rows) == 7
+    assert sum(row.status == "deprecated" for row in rows) == 1
+    assert sum(row.module == "add_transaction" for row in rows) == 6
     assert sum(row.module == "transactions" for row in rows) == 2
     assert _row(rows, "TC_ADD_TX_005").steps[3] == (
         'user creates custom category "baby cost"'

@@ -33,7 +33,7 @@ state, cross-platform execution, and attributable reports.
 | Multi-device concurrency | One command discovers all ready Android and iOS targets, then either replicates or shards the suite across isolated workers |
 | Collision-free Appium sessions | Unique Android `systemPort`, iOS WDA/MJPEG ports, and WDA derived-data paths per device |
 | Traceable reporting | Environment, app version, platform, device, OS version, UDID, per-case result, JUnit, logs, screenshots, and merged Allure results |
-| Advisory failure triage | Deterministic local signatures classify the first failed phase; an explicitly enabled Claude fallback handles ambiguous failures |
+| Advisory failure triage | After retries are exhausted, deterministic local signatures classify the final failed phase; an explicitly enabled Claude-compatible fallback handles ambiguous failures |
 | Excel-managed living cases | A validated registry incrementally updates only managed Gherkin blocks, preserves unchanged bytes, and can run only changed scenarios |
 | Reviewable engineering process | The technical specification defines layer rules, acceptance criteria, anti-patterns, and task-sized commits |
 
@@ -808,24 +808,35 @@ assumptions whenever they disagreed.
 ## AI Failure Triage
 
 Task 13 is a failure-time diagnostic layer for real regression runs. Passing
-cases do nothing. On the first failing `setup`, `call`, or `teardown` phase, it
-preserves the original failure, captures available evidence, assigns an
-advisory category, and suggests the next debugging action. This reduces initial
-triage time while keeping the engineer responsible for the root-cause decision.
+cases do nothing. Non-unit mobile cases run once plus at most two retries by
+default; the last attempt determines PASS/FAIL, while unit tests always run
+once. Each failed BDD attempt can attach an attempt-numbered screenshot and
+Appium page source. Only after all attempts fail does Task 13 preserve the final
+failure, assign an advisory category, and suggest the next debugging action.
 
-The first failed pytest phase (`setup`, `call`, or `teardown`) receives one
-advisory triage result. The verdict never changes the pytest outcome, hides the
-original traceback, retries a test, or files a bug automatically.
+The runtime order is `failure -> retry history -> final failure -> local
+signatures -> optional LLM`. The final failed pytest phase (`setup`, `call`, or
+`teardown`) receives exactly one advisory triage result. The verdict never
+changes the pytest outcome, hides the original traceback, or files a bug
+automatically. The optional LLM request itself is never retried.
 
 ```text
-[AI Triage] Locator (98%): Matched local failure signature 'element_missing'.
+[AI Triage] Locator (92%): Matched local failure signature 'selector_specific_missing'.
 ```
 
 The always-on local stage uses deterministic signatures for `Locator`,
 `App Bug`, `Env`, `Script`, and `Data`. Weak or unknown signals return
 `Unknown`; confidences are never added together. Results are attached to Allure
-as `AI Triage` JSON with the schema version, test, failing phase, category,
-confidence, reasoning, next action, classifier, and matched signature IDs.
+as `AI Triage` JSON with the schema version, test, failing phase, attempt count,
+failed BDD step, category, confidence, reasoning, next action, classifier, and
+matched signature IDs.
+
+Disable retries for a focused diagnostic run:
+
+```bash
+uv run pytest -m "not unit" -k "add_expense_happy_path" --reruns 0 -s -vv
+.venv/bin/python scripts/run_device_matrix.py --env preprod -- --reruns 0 -k "add_expense_happy_path" -s
+```
 
 | `classifier` | User-visible meaning |
 |---|---|

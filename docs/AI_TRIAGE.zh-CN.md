@@ -2,23 +2,30 @@
 
 ## 目的
 
-任务 13 用于缩短回归用例失败到第一次有效调试动作之间的时间。它仅将
-pytest 中**首个**失败阶段分类为 `Locator`、`App Bug`、`Env`、`Script`、
+任务 13 用于缩短回归用例失败到第一次有效调试动作之间的时间。重试耗尽后，
+它仅将 pytest 中**最终**失败阶段分类为 `Locator`、`App Bug`、`Env`、`Script`、
 `Data` 或 `Unknown` 之一,然后在终端和 Allure 中展示相同的顾问式结果。
 
-它不是用例生成器,也不是自动修复系统。**它从不**改变 pytest 结果、重试
-用例、修改 locator、隐藏 traceback,或自动提交缺陷。**通过的用例不会触发
-归类**。
+它不是用例生成器,也不是自动修复系统。移动端用例由
+`pytest-rerunfailures` 负责执行 1 次并最多重试 2 次,最终一次决定
+PASS/FAIL;unit tests 不重试。归因引擎**从不**改变 pytest 结果、修改
+locator、隐藏 traceback,或自动提交缺陷。**通过的用例不会触发归类**。
 
 ## 运行流程
 
 ```text
-setup/call/teardown 失败
+setup/call/teardown 失败(attempt 1 或 2)
           |
           v
-捕获原始异常 + 受限 traceback
+采集带 attempt 编号的截图 + Appium page source
           |
-          +-- call 阶段:先采集失败截图
+          +-- 仍有重试 --> 保存重试历史并再次执行
+          |
+          v
+最终失败(attempt 3)
+          |
+          v
+捕获原始异常 + 受限 traceback + 失败 BDD 步骤
           |
           v
 确定性本地特征匹配
@@ -41,17 +48,18 @@ setup/call/teardown 失败
 原始 pytest PASSED/FAILED 状态保持不变
 ```
 
-首个失败阶段会写入 pytest item 的 stash,因此 setup 阶段的失败不会重复
-触发 call/teardown 的诊断。call 阶段的截图会在归类之前采集,只有其
-**是否可用**与**基础文件名**可以进入 LLM 提示词;图像字节与绝对路径
-**永远不**会上传。
+严格顺序是 `失败 -> 重试历史 -> 最终失败 -> 本地规则 -> 可选 LLM`。
+每次 BDD 失败都保留唯一命名的 PNG/XML 证据。最终失败阶段会写入 pytest
+item 的 stash,避免重复诊断。只有截图的**是否可用**与**基础文件名**可以
+进入 LLM 提示词;图像字节、page source 和绝对路径**永远不**会上传。LLM
+请求本身也不会重试。
 
 ## 用户看到的内容
 
 终端只会收到一行简洁输出:
 
 ```text
-[AI Triage] Locator (98%): Matched local failure signature 'element_missing'.
+[AI Triage] Locator (92%): Matched local failure signature 'selector_specific_missing'.
 ```
 
 Allure 用例中包含一份 `AI Triage` JSON 附件,字段如下:
@@ -59,6 +67,7 @@ Allure 用例中包含一份 `AI Triage` JSON 附件,字段如下:
 | 字段 | 含义 |
 |---|---|
 | `test_name`、`phase` | 失败的用例以及 `setup`、`call` 或 `teardown` 阶段 |
+| `attempt`、`max_attempts`、`failed_step` | 重试耗尽时的次数与失败 BDD 动作 |
 | `category`、`confidence` | 顾问式分类结果与受限置信度 |
 | `reasoning`、`next_action` | 分类理由与下一步调试动作 |
 | `classifier` | `local`、`llm` 或 `disabled` |
@@ -75,7 +84,8 @@ Allure 用例中包含一份 `AI Triage` JSON 附件,字段如下:
 | 失败证据 | 大概率结果 | 价值 |
 |---|---|---|
 | setup 阶段 Appium 连接被拒 | `Env / local` | 把排查方向引导到服务器/设备配置 |
-| Page 内出现 `NoSuchElementException` | `Locator / local` | 指向 YAML locator 与当前页面 source |
+| 缺失元素同时带有明确 selector 策略 | `Locator / local` | 指向 YAML locator 与当前页面 source |
+| 动作后目标页元素缺失,但没有 selector 证据 | 可选 LLM 或 `Unknown / disabled` | 避免把下游状态症状直接判为 locator 缺陷 |
 | 月度汇总期望值与展示值不一致 | 当具备业务上下文时为 `App Bug / local` | 提示对比需求并手动复现 |
 | Flow 或 Page 中出现 `TypeError` | `Script / local` | 把排查方向引导到自动化实现 |
 | 不带上下文的裸 `AssertionError` | 启用 LLM 时为 `llm`,否则为 `disabled` | 仅在证据模糊时才使用兼容模型 |
@@ -127,6 +137,12 @@ PY
 ```
 
 ## 验证
+
+聚焦调试时使用 `--reruns 0` 关闭重试:
+
+```bash
+.venv/bin/pytest -m "not unit" -k "add_expense_happy_path" --reruns 0 -s -vv
+```
 
 运行完整的、不依赖设备的 Task 13 回归:
 

@@ -23,6 +23,7 @@ LLM_TIMEOUT_SECONDS = 5
 MAX_ERROR_MESSAGE_LENGTH = 2_000
 MAX_TRACEBACK_LENGTH = 12_000
 MAX_RESULT_TEXT_LENGTH = 500
+MAX_ATTEMPT_COUNT = 100
 
 CATEGORIES = ("Locator", "App Bug", "Env", "Script", "Data", "Unknown")
 _CATEGORY_PRIORITY = {
@@ -70,6 +71,9 @@ class NormalizedFailure:
     phase: str
     screenshot_available: bool
     screenshot_name: str | None
+    attempt: int
+    max_attempts: int
+    failed_step: str | None
 
 
 def _compile(pattern: str, *, dotall: bool = False) -> re.Pattern[str]:
@@ -103,11 +107,24 @@ LOCAL_SIGNATURES = (
         "Run adb devices; reconnect or boot the target device.",
     ),
     LocalSignature(
+        "selector_specific_missing",
+        "Locator",
+        _compile(
+            r"(?:(?:NoSuchElement(?:Exception|Error)|Unable to locate element)"
+            r".{0,400}(?:accessibility[ _-]?id|xpath|predicate|class name)|"
+            r"(?:accessibility[ _-]?id|xpath|predicate|class name).{0,400}"
+            r"(?:NoSuchElement(?:Exception|Error)|Unable to locate element))",
+            dotall=True,
+        ),
+        0.92,
+        "Verify the named selector against the current Appium page source.",
+    ),
+    LocalSignature(
         "element_missing",
         "Locator",
         _compile(r"(?:NoSuchElement(?:Exception|Error)|Unable to locate element)"),
-        0.98,
-        "Check the named locator YAML entry and current Appium page source.",
+        0.60,
+        "Inspect the current UI state and preceding action before changing a locator.",
     ),
     LocalSignature(
         "locator_timeout",
@@ -186,7 +203,7 @@ LOCAL_SIGNATURES = (
     LocalSignature(
         "python_contract",
         "Script",
-        _compile(r"(?:AttributeError|TypeError)"),
+        _compile(r"^(?:E\s+)?(?:AttributeError|TypeError)\s*:"),
         0.90,
         "Read the top project frame and correct the API/type usage.",
     ),
@@ -241,6 +258,17 @@ def normalize_failure(failure: Mapping[str, Any]) -> NormalizedFailure:
     if screenshot_path:
         normalized_path = str(screenshot_path).replace("\\", "/")
         screenshot_name = Path(normalized_path).name[:255]
+    attempt = _bounded_attempt_count(failure.get("attempt"), default=1)
+    max_attempts = max(
+        attempt,
+        _bounded_attempt_count(failure.get("max_attempts"), default=attempt),
+    )
+    raw_failed_step = failure.get("failed_step")
+    failed_step = None
+    if raw_failed_step is not None:
+        failed_step = redact_sensitive_text(str(raw_failed_step)).strip()[
+            :MAX_RESULT_TEXT_LENGTH
+        ] or None
     return NormalizedFailure(
         error_msg=error_msg[:MAX_ERROR_MESSAGE_LENGTH],
         traceback=traceback[-MAX_TRACEBACK_LENGTH:],
@@ -248,7 +276,21 @@ def normalize_failure(failure: Mapping[str, Any]) -> NormalizedFailure:
         phase=phase[:32] or "call",
         screenshot_available=screenshot_name is not None,
         screenshot_name=screenshot_name,
+        attempt=attempt,
+        max_attempts=max_attempts,
+        failed_step=failed_step,
     )
+
+
+def _bounded_attempt_count(value: Any, *, default: int) -> int:
+    """Normalize untrusted retry counts without allowing unbounded metadata."""
+    if isinstance(value, bool):
+        return default
+    try:
+        count = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(1, min(MAX_ATTEMPT_COUNT, count))
 
 
 def _local_match(failure: NormalizedFailure) -> tuple[LocalSignature, tuple[str, ...]] | None:
@@ -302,6 +344,9 @@ def _build_llm_request(failure: NormalizedFailure, model: str) -> dict[str, Any]
         "phase": failure.phase,
         "screenshot_available": failure.screenshot_available,
         "screenshot_name": failure.screenshot_name,
+        "attempt": failure.attempt,
+        "max_attempts": failure.max_attempts,
+        "failed_step": failure.failed_step,
     }
     return {
         "model": model,

@@ -38,17 +38,20 @@ Feature: Add Transaction
 
 # scenario_id: TC_ADD_TX_003
 # introduced_in: 1.0.0
+# deprecated_in: 1.0.0
 # platforms: android, ios
-  @smoke @p0
-  Scenario: Add transfer happy path
-    When user taps "Add Transfer"
-    And user enters amount "200"
-    And user selects category "Food"
-    And user enters tags "transfer"
-    And user taps Save
-    Then transaction appears in Recent transactions with amount "200.0"
-    And Transactions shows the saved transaction with matching date, amount, category, and time
-    And This Month summary is correct for budget "30000"
+# DEPRECATED BEGIN TC_ADD_TX_003
+#   @smoke @p0
+#   Scenario: Add transfer happy path
+#     When user taps "Add Transfer"
+#     And user enters amount "200"
+#     And user selects category "Food"
+#     And user enters tags "transfer"
+#     And user taps Save
+#     Then transaction appears in Recent transactions with amount "200.0"
+#     And Transactions shows the saved transaction with matching date, amount, category, and time
+#     And This Month summary is correct for budget "30000"
+# DEPRECATED END TC_ADD_TX_003
 
 # scenario_id: TC_ADD_TX_004
 # introduced_in: 1.0.0
@@ -77,5 +80,18 @@ Feature: Add Transaction
     And user taps Save
     Then transaction appears in Recent transactions with amount "50.0"
     And no transaction appears in Recent transactions with category "baby cost" missing
+    And Transactions shows the saved transaction with matching date, amount, category, and time
+    And This Month summary is correct for budget "30000"
+# scenario_id: TC_ADD_TX_006
+# introduced_in: 1.0.0
+# platforms: android, ios
+  @smoke @p0
+  Scenario: Add transfer with Health category
+    When user taps "Add Transfer"
+    And user enters amount "200"
+    And user selects category "Health"
+    And user enters tags "transfer"
+    And user taps Save
+    Then transaction appears in Recent transactions with amount "200.0"
     And Transactions shows the saved transaction with matching date, amount, category, and time
     And This Month summary is correct for budget "30000"

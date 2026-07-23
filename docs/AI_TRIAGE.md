@@ -3,23 +3,32 @@
 ## Purpose
 
 Task 13 reduces the time between a failed regression case and the first useful
-debugging action. It classifies only the first failed pytest phase as one of
+debugging action. After retries are exhausted, it classifies only the final
+failed pytest phase as one of
 `Locator`, `App Bug`, `Env`, `Script`, `Data`, or `Unknown`, then presents the
 same advisory result in the terminal and Allure.
 
-It is not a test generator or an automatic repair system. It never changes the
-pytest result, retries a case, edits a locator, suppresses a traceback, or files
-a defect. Passing cases do not invoke triage.
+It is not a test generator or an automatic repair system. Mobile cases are
+retried by `pytest-rerunfailures`, not by the triage engine: one initial attempt
+plus at most two retries, with the last attempt determining PASS/FAIL. Unit
+tests opt out. Triage never changes the pytest result, edits a locator,
+suppresses a traceback, or files a defect. Passing cases do not invoke triage.
 
 ## Runtime Flow
 
 ```text
-setup/call/teardown failure
+setup/call/teardown failure (attempt 1 or 2)
           |
           v
-capture original exception + bounded traceback
+capture attempt-numbered screenshot + Appium page source
           |
-          +-- call phase: capture failure screenshot first
+          +-- retry remains --> keep retry history and run again
+          |
+          v
+final failure (attempt 3)
+          |
+          v
+capture original exception + bounded traceback + failed BDD step
           |
           v
 deterministic local signatures
@@ -42,17 +51,19 @@ terminal line + Allure "AI Triage" JSON attachment
 original pytest PASSED/FAILED status remains unchanged
 ```
 
-The first failing phase is stored in the pytest item stash, so a setup failure
-cannot produce duplicate call/teardown diagnoses. A call-stage screenshot is
-captured before triage and only its availability plus basename may enter the
-LLM prompt; image bytes and absolute paths are never uploaded.
+The exact order is `failure -> retry history -> final failure -> local
+signatures -> optional LLM`. Each failed BDD attempt keeps uniquely named PNG
+and XML evidence. The final failing phase is stored in the pytest item stash,
+so it cannot produce duplicate diagnoses. Only screenshot availability and its
+basename may enter the LLM prompt; image bytes, page source, and absolute paths
+are never uploaded. The one LLM request is never retried.
 
 ## What Users See
 
 The terminal receives exactly one concise line:
 
 ```text
-[AI Triage] Locator (98%): Matched local failure signature 'element_missing'.
+[AI Triage] Locator (92%): Matched local failure signature 'selector_specific_missing'.
 ```
 
 The Allure case contains an `AI Triage` JSON attachment with:
@@ -60,6 +71,7 @@ The Allure case contains an `AI Triage` JSON attachment with:
 | Field | Meaning |
 |---|---|
 | `test_name`, `phase` | Failed case and `setup`, `call`, or `teardown` phase |
+| `attempt`, `max_attempts`, `failed_step` | Exhausted attempt context and failed BDD action |
 | `category`, `confidence` | Advisory classification and bounded confidence |
 | `reasoning`, `next_action` | Why it was classified and the next debugging step |
 | `classifier` | `local`, `llm`, or `disabled` |
@@ -76,7 +88,8 @@ The Allure case contains an `AI Triage` JSON attachment with:
 | Failure evidence | Likely result | Value |
 |---|---|---|
 | Appium connection refused during setup | `Env / local` | Routes investigation to server/device setup |
-| `NoSuchElementException` in a Page | `Locator / local` | Points to the YAML locator and current page source |
+| Missing element plus a named selector strategy | `Locator / local` | Points to the YAML locator and current page source |
+| Generic missing destination after an action | optional LLM or `Unknown / disabled` | Avoids treating a downstream state symptom as a proven locator defect |
 | Expected monthly summary differs from displayed value | `App Bug / local` when business context is present | Prompts requirement comparison and manual reproduction |
 | `TypeError` in a Flow or Page | `Script / local` | Routes investigation to automation implementation |
 | Bare `AssertionError` without context | `llm` when enabled, otherwise `disabled` | Uses the compatible model only for ambiguous evidence |
@@ -129,6 +142,12 @@ PY
 ```
 
 ## Verification
+
+Disable retries for a focused diagnostic run with `--reruns 0`:
+
+```bash
+.venv/bin/pytest -m "not unit" -k "add_expense_happy_path" --reruns 0 -s -vv
+```
 
 Run the complete device-free Task 13 regression:
 
