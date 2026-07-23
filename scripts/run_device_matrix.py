@@ -1190,13 +1190,12 @@ def parse_junit(path: Path) -> tuple[dict[str, int | float], list[TestCaseResult
     if not path.exists():
         return totals, []
     root = ET.parse(path).getroot()
-    suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-    for suite in suites:
-        for key in ("tests", "failures", "errors", "skipped"):
-            totals[key] += int(suite.attrib.get(key, 0))
-        totals["time"] += float(suite.attrib.get("time", 0.0))
-
-    cases: list[TestCaseResult] = []
+    cases_by_identity: dict[tuple[str, str], TestCaseResult] = {}
+    status_by_tag = {
+        "failure": "FAILED",
+        "error": "ERROR",
+        "skipped": "SKIPPED",
+    }
     for testcase in root.iter("testcase"):
         outcome = next(
             (
@@ -1206,17 +1205,23 @@ def parse_junit(path: Path) -> tuple[dict[str, int | float], list[TestCaseResult
             ),
             None,
         )
-        status = outcome.tag.upper() if outcome is not None else "PASSED"
+        status = status_by_tag[outcome.tag] if outcome is not None else "PASSED"
         message = outcome.attrib.get("message", "") if outcome is not None else ""
-        cases.append(
-            TestCaseResult(
-                name=testcase.attrib.get("name", "unknown"),
-                classname=testcase.attrib.get("classname", ""),
-                status=status,
-                duration_seconds=round(float(testcase.attrib.get("time", 0.0)), 3),
-                message=" ".join(message.split()),
-            )
+        result = TestCaseResult(
+            name=testcase.attrib.get("name", "unknown"),
+            classname=testcase.attrib.get("classname", ""),
+            status=status,
+            duration_seconds=round(float(testcase.attrib.get("time", 0.0)), 3),
+            message=" ".join(message.split()),
         )
+        cases_by_identity[(result.classname, result.name)] = result
+
+    cases = list(cases_by_identity.values())
+    totals["tests"] = len(cases)
+    totals["failures"] = sum(case.status == "FAILED" for case in cases)
+    totals["errors"] = sum(case.status == "ERROR" for case in cases)
+    totals["skipped"] = sum(case.status == "SKIPPED" for case in cases)
+    totals["time"] = round(sum(case.duration_seconds for case in cases), 3)
     return totals, cases
 
 

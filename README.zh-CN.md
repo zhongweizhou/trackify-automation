@@ -33,7 +33,7 @@
 | 多设备并发 | 一个命令发现全部可用 Android/iOS 设备，并通过独立 pytest 进程选择全量复制或用例分片 |
 | Appium 端口隔离 | 为 Android `systemPort`、iOS WDA/MJPEG 端口和 derived-data 目录分配唯一值 |
 | 可追溯报告 | 记录环境、App 版本、平台、设备、系统版本、UDID、逐用例结果、JUnit、日志、截图和合并 Allure |
-| 失败智能归因 | 首个失败阶段先使用确定性本地签名分类，歧义失败仅在显式开启后调用 Claude fallback |
+| 失败智能归因 | 重试耗尽后，确定性本地签名只分类最终失败阶段；歧义失败仅在显式开启后调用 Claude 兼容 fallback |
 | Excel 活用例库 | 经过校验的用例表只增量更新受管 Gherkin 块，保持未变化字节，并可只执行变化场景 |
 | 可评审过程 | 技术规格明确分层规则、验收标准、反模式和按任务拆分的提交纪律 |
 
@@ -586,22 +586,32 @@ report/device-matrix/<环境>/<时间戳>/
 ## AI 失败归因
 
 Task 13 是真实回归测试失败后的诊断层。用例通过时不做任何处理；首个
-`setup`、`call` 或 `teardown` 阶段失败时，它保留原始失败和已有证据，给出
-建议分类及下一步排查动作。它用于缩短首次定位时间，最终根因仍由工程师根据
-traceback、截图和业务要求确认。
+非 unit 移动端用例默认执行 1 次，并最多重试 2 次，最终一次结果决定
+PASS/FAIL；unit tests 始终只执行一次。每次 BDD 失败都会按 attempt 编号保存
+截图和 Appium page source。只有全部尝试都失败后，Task 13 才对最终失败给出
+建议分类及下一步排查动作。
 
-pytest 的首个失败阶段（`setup`、`call` 或 `teardown`）会生成一次建议性质
-的归因结果。该结果不会改变 pytest 状态、隐藏原始 traceback、自动重试或
-自动提交缺陷。
+执行顺序是 `失败 -> 重试历史 -> 最终失败 -> 本地规则 -> 可选 LLM`。最终
+失败的 `setup`、`call` 或 `teardown` 阶段只生成一次归因结果。该结果不会
+改变 pytest 状态、隐藏原始 traceback 或自动提交缺陷；LLM 请求本身也不会
+重试。
 
 ```text
-[AI Triage] Locator (98%): Matched local failure signature 'element_missing'.
+[AI Triage] Locator (92%): Matched local failure signature 'selector_specific_missing'.
 ```
 
 始终开启的本地阶段使用确定性签名识别 `Locator`、`App Bug`、`Env`、
 `Script` 和 `Data`。弱信号不会累加置信度，无法可靠判断时返回 `Unknown`。
 Allure 中会附加名为 `AI Triage` 的 JSON，包含 schema 版本、测试名称、失败
-阶段、分类、置信度、原因、建议动作、分类器和命中的本地签名 ID。
+阶段、attempt/最大次数、失败 BDD 步骤、分类、置信度、原因、建议动作、
+分类器和命中的本地签名 ID。
+
+聚焦调试时可以关闭重试：
+
+```bash
+uv run pytest -m "not unit" -k "add_expense_happy_path" --reruns 0 -s -vv
+.venv/bin/python scripts/run_device_matrix.py --env preprod -- --reruns 0 -k "add_expense_happy_path" -s
+```
 
 | `classifier` | 用户应如何理解 |
 |---|---|

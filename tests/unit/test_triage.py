@@ -65,10 +65,10 @@ def _valid_llm_response(**overrides: Any) -> dict[str, Any]:
         ),
         ("adb: command not found", "", "Env", "device_unavailable"),
         (
-            "NoSuchElementException: Unable to locate element",
+            "NoSuchElementException using accessibility id Save Transaction",
             "",
             "Locator",
-            "element_missing",
+            "selector_specific_missing",
         ),
         (
             "TimeoutException after find_element using accessibility_id",
@@ -160,12 +160,62 @@ def test_local_hit_does_not_read_environment_or_call_llm(
 
     monkeypatch.setattr(os, "getenv", fail_getenv)
     result = triage_failure(
-        {"error_msg": "NoSuchElementException", "traceback": ""},
+        {
+            "error_msg": "NoSuchElementException using accessibility id Save",
+            "traceback": "",
+        },
         llm_callable=fake_llm,
     )
 
     assert result.category == "Locator"
     assert calls == 0
+
+
+def test_selector_specific_missing_element_stays_local() -> None:
+    result = triage_failure(
+        {
+            "error_msg": (
+                "NoSuchElementError using accessibility id Save Transaction"
+            ),
+            "traceback": "",
+        }
+    )
+
+    assert (result.category, result.classifier) == ("Locator", "local")
+
+
+def test_generic_missing_destination_element_can_fall_back_to_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_llm(monkeypatch)
+
+    result = triage_failure(
+        {
+            "error_msg": "NoSuchElementError",
+            "traceback": "tap_save -> home_page.verify_visible -> home_tab",
+        },
+        llm_callable=lambda payload: _valid_llm_response(category="Script"),
+    )
+
+    assert result.category == "Script"
+    assert result.classifier == "llm"
+
+
+def test_type_name_in_traceback_does_not_override_generic_missing_element(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_llm(monkeypatch)
+
+    result = triage_failure(
+        {
+            "error_msg": "NoSuchElementError",
+            "traceback": "library docs mention TypeError but no exception line",
+        },
+        llm_callable=lambda payload: _valid_llm_response(category="App Bug"),
+    )
+
+    assert result.category == "App Bug"
+    assert result.classifier == "llm"
 
 
 def test_classify_local_is_deterministic() -> None:
@@ -466,6 +516,9 @@ def test_prompt_redacts_and_bounds_untrusted_input(
             "test_name": "test_secret",
             "phase": "call",
             "screenshot_path": "/Users/private/results/failure.png",
+            "attempt": 3,
+            "max_attempts": 3,
+            "failed_step": "And user taps Save api_key=private-step-key",
         },
         llm_callable=fake_llm,
     )
@@ -475,10 +528,14 @@ def test_prompt_redacts_and_bounds_untrusted_input(
     serialized = json.dumps(captured)
     assert "top-secret" not in serialized
     assert "private-key" not in serialized
+    assert "private-step-key" not in serialized
     assert "query-secret" not in serialized
     assert "/Users/private" not in serialized
     assert failure_payload["screenshot_name"] == "failure.png"
     assert failure_payload["screenshot_available"] is True
+    assert failure_payload["attempt"] == 3
+    assert failure_payload["max_attempts"] == 3
+    assert failure_payload["failed_step"] == "And user taps Save api_key=[REDACTED]"
     assert len(failure_payload["error_msg"]) <= 2_000
     assert len(failure_payload["traceback"]) <= 12_000
 
@@ -573,6 +630,9 @@ def test_first_failed_phase_attaches_and_prints_exactly_once(
         "schema_version": 1,
         "test_name": "tests/unit/test_controlled.py::test_failure",
         "phase": "setup",
+        "attempt": 1,
+        "max_attempts": 1,
+        "failed_step": None,
         "category": "Script",
         "confidence": 0.9,
         "reasoning": "Matched local failure signature 'python_contract'.",

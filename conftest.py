@@ -8,7 +8,7 @@ import re
 import subprocess
 import warnings
 from collections.abc import Generator, Mapping
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,18 @@ SCREENSHOT_DIR = Path(
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 _TRIAGED_FAILURE = pytest.StashKey[bool]()
 _EXECUTION_CONTEXT = pytest.StashKey[dict[str, str]]()
+_FAILURE_EVIDENCE = pytest.StashKey[dict[int, "FailureEvidence"]]()
+_ACTIVE_DRIVER = pytest.StashKey[Any]()
+
+
+@dataclass(frozen=True)
+class FailureEvidence:
+    """Artifacts captured while a failed BDD step still owns its driver."""
+
+    attempt: int
+    failed_step: str | None
+    screenshot_path: Path | None
+    page_source_path: Path | None
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -60,6 +72,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Target environment profile (default: TEST_ENV or preprod).",
     )
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Keep device-free unit checks deterministic and single-attempt."""
+    for item in items:
+        if item.get_closest_marker("unit") is not None:
+            item.add_marker(pytest.mark.flaky(reruns=0))
 
 
 class FeatureFile(pytest.File):
@@ -120,6 +139,98 @@ def pytest_bdd_before_scenario(
     allure.dynamic.feature(feature.name)
 
 
+def pytest_bdd_step_error(
+    request: pytest.FixtureRequest,
+    step: Any,
+    exception: BaseException,
+) -> None:
+    """Capture per-attempt evidence while pytest-bdd still exposes the driver."""
+    del exception
+    try:
+        appium_driver = request.getfixturevalue("driver")
+    except Exception as exc:
+        warnings.warn(
+            pytest.PytestWarning(
+                f"Cannot capture {request.node.name!r}: driver fixture is unavailable: "
+                f"{exc}"
+            ),
+            stacklevel=1,
+        )
+        return
+
+    failed_step = " ".join(
+        str(value).strip()
+        for value in (getattr(step, "keyword", ""), getattr(step, "name", ""))
+        if str(value).strip()
+    )
+    _capture_driver_evidence(
+        request.node,
+        appium_driver,
+        failed_step=failed_step or None,
+    )
+
+
+def _capture_driver_evidence(
+    item: pytest.Item,
+    appium_driver: Any,
+    *,
+    failed_step: str | None,
+) -> FailureEvidence:
+    """Save and attach one attempt's screenshot and Appium page source."""
+    attempt = max(1, int(getattr(item, "execution_count", 1)))
+    safe_test_name = _SAFE_FILENAME_PATTERN.sub("_", item.name).strip("._")
+    prefix = SCREENSHOT_DIR / f"{safe_test_name}-attempt-{attempt}"
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path: Path | None = Path(f"{prefix}.png")
+    page_source_path: Path | None = Path(f"{prefix}.xml")
+
+    try:
+        saved = appium_driver.save_screenshot(str(screenshot_path))
+        if saved is False:
+            raise RuntimeError("Appium returned false while saving the screenshot.")
+        allure.attach.file(
+            str(screenshot_path),
+            name=f"Failure screenshot - attempt {attempt}",
+            attachment_type=allure.attachment_type.PNG,
+        )
+    except Exception as exc:
+        screenshot_path = None
+        warnings.warn(
+            pytest.PytestWarning(
+                f"Could not capture failure screenshot for {item.name!r}: {exc}"
+            ),
+            stacklevel=1,
+        )
+
+    try:
+        page_source_path.write_text(
+            str(appium_driver.page_source),
+            encoding="utf-8",
+        )
+        allure.attach.file(
+            str(page_source_path),
+            name=f"Appium page source - attempt {attempt}",
+            attachment_type=allure.attachment_type.XML,
+        )
+    except Exception as exc:
+        page_source_path = None
+        warnings.warn(
+            pytest.PytestWarning(
+                f"Could not capture Appium page source for {item.name!r}: {exc}"
+            ),
+            stacklevel=1,
+        )
+
+    evidence = FailureEvidence(
+        attempt=attempt,
+        failed_step=failed_step,
+        screenshot_path=screenshot_path,
+        page_source_path=page_source_path,
+    )
+    item.stash.setdefault(_FAILURE_EVIDENCE, {})[attempt] = evidence
+    return evidence
+
+
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """Add matrix identity before fixtures so setup failures remain attributable."""
     context = _execution_context(
@@ -129,10 +240,10 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 
 def pytest_runtest_call(item: pytest.Item) -> None:
-    """Attach app metadata after driver fixtures have completed setup."""
+    """Attach the resolved app version after driver fixture setup."""
     context = item.config.stash.get(_EXECUTION_CONTEXT, None)
     if context is not None:
-        _attach_allure_context(context, include_app_version=True)
+        _attach_allure_app_version(context)
 
 
 def _attach_allure_context(
@@ -153,19 +264,74 @@ def _attach_allure_context(
     allure.dynamic.parameter("UDID", context["device_udid"])
 
 
+def _attach_allure_app_version(context: Mapping[str, str]) -> None:
+    """Add late-resolved app metadata without duplicating suite labels."""
+    allure.dynamic.parameter("App Version", context["app_version"])
+
+
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(
     item: pytest.Item,
     call: pytest.CallInfo[Any],
 ) -> Generator[None, Any, None]:
-    """Capture call failures and triage the first failed test phase."""
+    """Capture failures and triage only after configured reruns are exhausted."""
     outcome = yield
     report = outcome.get_result()
-    if report.failed and call.excinfo is not None:
-        screenshot_path = (
-            _capture_failure_screenshot(item) if report.when == "call" else None
-        )
-        _triage_first_failure(item, call, report, screenshot_path)
+    if not report.failed or call.excinfo is None:
+        return
+
+    attempt = max(1, int(getattr(item, "execution_count", 1)))
+    evidence = item.stash.get(_FAILURE_EVIDENCE, {}).get(attempt)
+    if evidence is None and not _is_unit_item(item):
+        appium_driver = _active_driver_for_item(item)
+        if appium_driver is not None:
+            evidence = _capture_driver_evidence(
+                item,
+                appium_driver,
+                failed_step=None,
+            )
+        elif callable(getattr(item, "get_closest_marker", None)):
+            warnings.warn(
+                pytest.PytestWarning(
+                    f"Cannot capture {item.name!r}: driver fixture is unavailable."
+                ),
+                stacklevel=1,
+            )
+
+    if not _is_final_attempt(item):
+        return
+
+    screenshot_path = evidence.screenshot_path if evidence is not None else None
+    _triage_first_failure(item, call, report, screenshot_path)
+
+
+def _configured_reruns(item: pytest.Item) -> int:
+    """Return the rerun count resolved from CLI, marker, or global defaults."""
+    from pytest_rerunfailures import get_reruns_count
+
+    return max(0, int(get_reruns_count(item) or 0))
+
+
+def _is_final_attempt(item: pytest.Item) -> bool:
+    """Return whether the current execution is beyond all allowed reruns."""
+    attempt = max(1, int(getattr(item, "execution_count", 1)))
+    return attempt > _configured_reruns(item)
+
+
+def _is_unit_item(item: pytest.Item) -> bool:
+    marker_getter = getattr(item, "get_closest_marker", None)
+    return callable(marker_getter) and marker_getter("unit") is not None
+
+
+def _active_driver_for_item(item: pytest.Item) -> Any | None:
+    funcargs = getattr(item, "funcargs", None)
+    if isinstance(funcargs, Mapping) and funcargs.get("driver") is not None:
+        return funcargs["driver"]
+    config = getattr(item, "config", None)
+    stash = getattr(config, "stash", None)
+    if stash is None:
+        return None
+    return stash.get(_ACTIVE_DRIVER, None)
 
 
 def _triage_first_failure(
@@ -179,6 +345,14 @@ def _triage_first_failure(
         return
     item.stash[_TRIAGED_FAILURE] = True
 
+    attempt = max(1, int(getattr(item, "execution_count", 1)))
+    try:
+        max_attempts = max(attempt, _configured_reruns(item) + 1)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        max_attempts = attempt
+    evidence = item.stash.get(_FAILURE_EVIDENCE, {}).get(attempt)
+    failed_step = evidence.failed_step if evidence is not None else None
+
     try:
         result = triage_failure(
             {
@@ -187,6 +361,9 @@ def _triage_first_failure(
                 "test_name": item.nodeid,
                 "phase": report.when,
                 "screenshot_path": screenshot_path,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "failed_step": failed_step,
             }
         )
     except Exception:
@@ -204,6 +381,9 @@ def _triage_first_failure(
         "schema_version": SCHEMA_VERSION,
         "test_name": safe_test_name,
         "phase": report.when,
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "failed_step": failed_step,
         **asdict(result),
     }
     try:
@@ -236,8 +416,8 @@ def _triage_first_failure(
 
 
 def _capture_failure_screenshot(item: pytest.Item) -> Path | None:
-    driver = item.funcargs.get("driver")
-    if driver is None:
+    appium_driver = _active_driver_for_item(item)
+    if appium_driver is None:
         warnings.warn(
             pytest.PytestWarning(
                 f"Cannot capture {item.name!r}: driver fixture is unavailable."
@@ -245,29 +425,11 @@ def _capture_failure_screenshot(item: pytest.Item) -> Path | None:
             stacklevel=1,
         )
         return None
-
-    safe_test_name = _SAFE_FILENAME_PATTERN.sub("_", item.name).strip("._")
-    screenshot_path = SCREENSHOT_DIR / f"{safe_test_name}.png"
-    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        saved = driver.save_screenshot(str(screenshot_path))
-        if saved is False:
-            raise RuntimeError("Appium returned false while saving the screenshot.")
-        allure.attach.file(
-            str(screenshot_path),
-            name=f"Failure screenshot - {item.name}",
-            attachment_type=allure.attachment_type.PNG,
-        )
-    except Exception as exc:
-        warnings.warn(
-            pytest.PytestWarning(
-                f"Could not capture failure screenshot for {item.name!r}: {exc}"
-            ),
-            stacklevel=1,
-        )
-        return None
-    return screenshot_path
+    return _capture_driver_evidence(
+        item,
+        appium_driver,
+        failed_step=None,
+    ).screenshot_path
 
 
 @pytest.fixture(scope="session")
@@ -292,6 +454,7 @@ def driver(
     platform = os.getenv("PLATFORM", "android")
     config = load_config(platform=platform)
     appium_driver = AppiumDriverFactory(config=config).create()
+    pytestconfig.stash[_ACTIVE_DRIVER] = appium_driver
     try:
         partial_context = _execution_context(
             appium_driver,
@@ -309,7 +472,10 @@ def driver(
         _write_allure_environment(pytestconfig, context)
         yield appium_driver
     finally:
-        appium_driver.quit()
+        try:
+            appium_driver.quit()
+        finally:
+            del pytestconfig.stash[_ACTIVE_DRIVER]
 
 
 @pytest.fixture(autouse=True)
